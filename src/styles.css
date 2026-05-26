@@ -65,10 +65,21 @@ th { position: sticky; top: 0; background: #f8fafb; color: #4d5a68; font-size: 1
 .conflict-list { display: grid; gap: 12px; }
 .conflict-item { border: 1px solid #e2e8ed; border-radius: 8px; padding: 14px; display: grid; gap: 12px; }
 .conflict-item p { margin: 6px 0; }
+.group-heading { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.group-heading .muted { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.feature-strip { display: flex; flex-wrap: wrap; gap: 8px; }
+.feature-strip span { background: #f0f4f7; border: 1px solid #dce5eb; border-radius: 999px; padding: 5px 9px; font-size: 12px; font-weight: 800; color: #405065; }
+.group-vehicles { display: grid; gap: 8px; }
+.group-vehicles article { display: grid; grid-template-columns: 110px 1fr auto; gap: 10px; align-items: center; border: 1px solid #e7edf1; border-radius: 8px; padding: 10px; background: #fbfcfd; }
 .manual-grid { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+.manual-grid.expanded { grid-template-columns: 2fr repeat(3, 1fr); }
 .manual-results { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; max-height: 360px; overflow: auto; }
 .manual-results button { align-items: flex-start; background: #f8fafb; color: #243242; border: 1px solid #dfe7ec; flex-direction: column; text-align: left; }
 .manual-results span { color: #657388; font-weight: 500; }
+.manual-results.table-like { grid-template-columns: 1fr; max-height: 520px; }
+.manual-results.table-like article { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; border: 1px solid #dfe7ec; border-radius: 8px; padding: 12px; background: #fbfcfd; }
+.manual-results.table-like div { display: grid; gap: 5px; }
+.search-modal { width: min(1160px, 100%); }
 .missing-list { display: grid; gap: 12px; }
 .missing-item { border: 1px solid #e2e8ed; border-radius: 8px; padding: 14px; display: grid; grid-template-columns: 1.2fr 1fr 1.5fr; gap: 10px; align-items: start; }
 .missing-item textarea { min-height: 72px; margin: 0; }
@@ -80,12 +91,22 @@ th { position: sticky; top: 0; background: #f8fafb; color: #4d5a68; font-size: 1
 .detail-grid p { display: grid; grid-template-columns: 180px 1fr; gap: 8px; margin: 0; padding: 8px 0; border-bottom: 1px solid #edf1f4; }
 .detail-grid span { color: #647386; font-weight: 800; }
 .explain { background: #f6f8fa; border-radius: 8px; padding: 12px; }
+.debug-box { margin-top: 14px; border: 1px solid #dfe7ec; border-radius: 8px; padding: 10px 12px; background: #fbfcfd; }
+.debug-box summary { cursor: pointer; font-weight: 800; }
+.debug-box pre { overflow: auto; max-height: 360px; white-space: pre-wrap; font-size: 12px; color: #334155; }
 .toast { position: sticky; top: 10px; z-index: 10; width: 100%; justify-content: flex-start; margin-bottom: 14px; background: #243242; }
+.processing-overlay { position: fixed; inset: 0; z-index: 30; background: rgba(245,247,251,.82); display: grid; place-items: center; padding: 18px; }
+.processing-card { width: min(460px, 100%); background: white; border: 1px solid #dfe7ec; border-radius: 8px; box-shadow: 0 24px 80px rgba(23,35,52,.2); padding: 22px; display: grid; gap: 10px; text-align: center; }
+.processing-card progress { width: 100%; height: 12px; accent-color: #116149; }
+.spinner { width: 38px; height: 38px; border: 4px solid #dbe6ec; border-top-color: #116149; border-radius: 50%; animation: spin .8s linear infinite; margin: 0 auto; }
+.pagination { display: flex; justify-content: flex-end; align-items: center; gap: 10px; padding-top: 12px; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 860px) {
   main { width: min(100% - 16px, 760px); padding-top: 12px; }
   .app-header, .export-panel, .section-heading { align-items: flex-start; flex-direction: column; }
-  .stepper, .load-grid, .summary-grid, .manual-grid, .detail-grid, .missing-item { grid-template-columns: 1fr; }
+  .stepper, .load-grid, .summary-grid, .manual-grid, .manual-grid.expanded, .detail-grid, .missing-item, .group-vehicles article, .manual-results.table-like article { grid-template-columns: 1fr; }
+  .group-heading { flex-direction: column; }
   .stepper { gap: 6px; }
   .filters label input { min-width: 0; width: 100%; }
 }

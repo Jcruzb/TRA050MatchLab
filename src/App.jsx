@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import AppHeader from "./components/AppHeader.jsx";
 import Stepper from "./components/Stepper.jsx";
 import UploadPanel from "./components/UploadPanel.jsx";
@@ -13,9 +13,10 @@ import VehicleDetailModal from "./components/VehicleDetailModal.jsx";
 import ExportPanel from "./components/ExportPanel.jsx";
 import { VEHICLE_DB } from "./data/vehicle-db.js";
 import { TRA050_CONSUMO_REFERENCIA_NUEVO_ELECTRICO } from "./data/tra050-reference.js";
-import { buildSearchIndex, matchRows, MATCH_MEANINGS, MATCH_STATES } from "./utils/matchEngine.js";
+import { buildSearchIndex, matchRowsInChunks, MATCH_MEANINGS, MATCH_STATES } from "./utils/matchEngine.js";
 import { validateRows } from "./utils/validation.js";
 import { normalizeText } from "./utils/normalize.js";
+import { groupConflictResults } from "./utils/groupConflicts.js";
 
 const STORAGE_KEY = "tra050-matchlab-session";
 const DEFAULT_MISSING_REFERENCE = {
@@ -31,6 +32,8 @@ export default function App() {
   const [items, setItems] = useState([]);
   const [selected, setSelected] = useState(null);
   const [toast, setToast] = useState("");
+  const [processing, setProcessing] = useState(null);
+  const cancelRef = useRef({ cancelled: false });
 
   useEffect(() => {
     try {
@@ -48,16 +51,29 @@ export default function App() {
     if (items.length) localStorage.setItem(STORAGE_KEY, JSON.stringify({ items, validation, editedAt: new Date().toISOString() }));
   }, [items, validation]);
 
-  function handleRows(rows) {
+  async function handleRows(rows) {
+    cancelRef.current = { cancelled: false };
+    setProcessing({ stage: "Validando estructura", processed: 0, total: rows.length, percent: 0 });
     const result = validateRows(rows);
     setValidation(result);
     if (result.hasErrors) {
       setItems([]);
       setToast("Hay errores criticos de estructura. Corrigelos antes de ejecutar matching.");
+      setProcessing(null);
       return;
     }
-    setItems(matchRows(result.rows, index));
-    setToast(`Carga procesada: ${result.rows.length} vehiculos.`);
+    try {
+      setProcessing({ stage: "Ejecutando matching", processed: 0, total: result.rows.length, percent: 0 });
+      const matched = await matchRowsInChunks(result.rows, index, setProcessing, cancelRef.current);
+      setProcessing({ stage: "Agrupando conflictos", processed: result.rows.length, total: result.rows.length, percent: 100 });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      setItems(matched);
+      setToast(`Carga procesada: ${result.rows.length} vehiculos.`);
+    } catch (error) {
+      setToast(error.message || "No se pudo completar el analisis. Revisa el archivo o intenta procesar menos filas.");
+    } finally {
+      setProcessing(null);
+    }
   }
 
   function assignCandidate(itemId, candidateId, manual = false, candidateOverride = null) {
@@ -73,8 +89,41 @@ export default function App() {
         match_significado: MATCH_MEANINGS[MATCH_STATES.exacto],
         explicacion_match: manual ? `Asignacion manual a ${candidate.modeloOriginal}.` : item.explicacion_match,
         match_manual: manual,
+        manual_search_used: Boolean(candidateOverride),
         vehiculo_no_encontrado_db: false,
         reference: null
+      };
+    }));
+  }
+
+  function assignCandidateToGroup(group, candidateId, mode = "manual-selection") {
+    const timestamp = new Date().toISOString();
+    const ids = new Set(group.vehicles.map((vehicle) => vehicle.rowId));
+    setItems((current) => current.map((item) => {
+      if (!ids.has(item.id)) return item;
+      const candidate = item.candidates.find((entry) => entry.id_idae === candidateId) || index.find((entry) => entry.id_idae === candidateId);
+      if (!candidate) return item;
+      return {
+        ...item,
+        assigned: candidate,
+        match_estado: MATCH_STATES.exacto,
+        match_score: candidate.score || item.match_score || 100,
+        match_significado: MATCH_MEANINGS[MATCH_STATES.exacto],
+        explicacion_match: mode === "global-search"
+          ? `Asignado manualmente por el usuario desde busqueda global en DB IDAE: ${candidate.modeloOriginal}.`
+          : `Resolucion de grupo aplicada a ${group.groupSize} vehiculos: ${candidate.modeloOriginal}.`,
+        match_manual: true,
+        manual_search_used: mode === "global-search",
+        vehiculo_no_encontrado_db: false,
+        reference: null,
+        conflict_group_key: group.groupKey,
+        conflict_group_label: group.label,
+        conflict_group_size: group.groupSize,
+        resolved_as_group: true,
+        group_resolution_key: group.groupKey,
+        group_resolution_applied: true,
+        group_resolution_timestamp: timestamp,
+        group_resolution_mode: mode
       };
     }));
   }
@@ -91,6 +140,39 @@ export default function App() {
       match_manual: true,
       reference: DEFAULT_MISSING_REFERENCE,
       notes: item.notes || "Pendiente de justificar consumo de referencia TRA050."
+    } : item));
+  }
+
+  function markGroupMissing(group) {
+    const timestamp = new Date().toISOString();
+    const ids = new Set(group.vehicles.map((vehicle) => vehicle.rowId));
+    setItems((current) => current.map((item) => ids.has(item.id) ? {
+      ...item,
+      assigned: null,
+      match_estado: MATCH_STATES.noEncontrado,
+      match_score: 0,
+      match_significado: MATCH_MEANINGS[MATCH_STATES.noEncontrado],
+      explicacion_match: `Vehiculo no encontrado en DB aplicado al grupo ${group.label}.`,
+      vehiculo_no_encontrado_db: true,
+      match_manual: true,
+      reference: DEFAULT_MISSING_REFERENCE,
+      notes: item.notes || "Pendiente de justificar consumo de referencia TRA050.",
+      conflict_group_key: group.groupKey,
+      conflict_group_label: group.label,
+      conflict_group_size: group.groupSize,
+      resolved_as_group: true,
+      group_resolution_key: group.groupKey,
+      group_resolution_applied: true,
+      group_resolution_timestamp: timestamp,
+      group_resolution_mode: "not-found"
+    } : item));
+  }
+
+  function resolveIndividually(itemId) {
+    setItems((current) => current.map((item) => item.id === itemId ? {
+      ...item,
+      group_individual_resolution: true,
+      resolved_as_group: false
     } : item));
   }
 
@@ -131,11 +213,24 @@ export default function App() {
 
   const currentStep = items.length ? (items.some((item) => [MATCH_STATES.conflicto, MATCH_STATES.probable].includes(item.match_estado)) ? 3 : 4) : validation ? 1 : 0;
   const selectedFresh = selected ? items.find((item) => item.id === selected.id) : null;
+  const conflictGroups = useMemo(() => groupConflictResults(items), [items]);
 
   return (
     <main>
       <AppHeader dbCount={index.length} onClear={clearSession} />
       <Stepper current={currentStep} />
+      {processing && (
+        <section className="processing-overlay">
+          <div className="processing-card">
+            <div className="spinner" />
+            <h2>{processing.stage}</h2>
+            <p>Procesando {processing.processed.toLocaleString("es-ES")} de {processing.total.toLocaleString("es-ES")} vehiculos...</p>
+            <progress value={processing.percent} max="100" />
+            <strong>{processing.percent}%</strong>
+            <button className="ghost small" onClick={() => { cancelRef.current.cancelled = true; }}>Cancelar procesamiento</button>
+          </div>
+        </section>
+      )}
       {toast && <button className="toast" onClick={() => setToast("")}>{toast}</button>}
       <div className="load-grid">
         <UploadPanel onRows={handleRows} onError={setToast} />
@@ -144,7 +239,7 @@ export default function App() {
       <ValidationSummary validation={validation} />
       <MatchSummaryCards items={items} alerts={validation?.alerts || []} />
       <VehiclesTable items={items} onSelect={setSelected} onMarkMissing={markMissing} />
-      <ConflictResolver items={items} onAssign={assignCandidate} onApplySimilar={applySimilar} onMarkMissing={markMissing} />
+      <ConflictResolver groups={conflictGroups} index={index} onAssign={assignCandidate} onAssignGroup={assignCandidateToGroup} onApplySimilar={applySimilar} onMarkMissing={markMissing} onMarkGroupMissing={markGroupMissing} onResolveIndividually={resolveIndividually} onSelect={setSelected} />
       <MissingReferencePanel items={items} onUpdate={updateMissingReference} />
       <ManualDbSearch index={index} selectedItem={selectedFresh} onAssign={assignCandidate} />
       <ExportPanel items={items} />

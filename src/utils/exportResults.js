@@ -17,10 +17,16 @@ export function flattenResult(item) {
     tipologia_referencia_tra050: item.reference?.tipologia || "",
     combustible_referencia_tra050: item.reference?.combustible || "",
     match_manual: Boolean(item.match_manual),
+    manual_search_used: Boolean(item.manual_search_used),
     fecha_validacion: new Date().toISOString(),
     explicacion_match: item.explicacion_match,
     conflictos_detectados: item.conflictos_detectados,
-    observaciones_match: item.notes || ""
+    observaciones_match: item.notes || "",
+    conflict_group_key: item.conflict_group_key || item.group_resolution_key || "",
+    conflict_group_label: item.conflict_group_label || "",
+    conflict_group_size: item.conflict_group_size || "",
+    resolved_as_group: Boolean(item.resolved_as_group),
+    group_resolution_mode: item.group_resolution_mode || ""
   };
 }
 

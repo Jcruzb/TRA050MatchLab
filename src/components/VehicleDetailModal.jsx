@@ -21,17 +21,28 @@ export default function VehicleDetailModal({ item, onClose }) {
             <p><span>Modelo IDAE</span>{item.assigned?.modeloOriginal || "-"}</p>
             <p><span>Titulo modal</span>{item.assigned?.raw?.titulo_modal || "-"}</p>
             <p><span>Segmento</span>{detail["Segmento comercial"] || "-"}</p>
-            <p><span>Motorizacion</span>{detail["Motorización"] || detail["MotorizaciÃ³n"] || item.assigned?.motorizacion || "-"}</p>
+            <p><span>Motorizacion</span>{item.assigned?.motorizacion || "-"}</p>
             <p><span>Cilindrada</span>{detail.Cilindrada || item.assigned?.cilindradaCc || "-"}</p>
-            <p><span>Potencia</span>{detail.Potencia || "-"}</p>
-            <p><span>Potencia electrica</span>{detail["Potencia eléctrica"] || detail["Potencia elÃ©ctrica"] || "-"}</p>
-            <p><span>Tipo de cambio</span>{detail["Tipo de cambio"] || item.assigned?.tipoCambio || "-"}</p>
+            <p><span>Potencia</span>{detail.Potencia || item.assigned?.potenciaCv || "-"}</p>
+            <p><span>Potencia electrica</span>{item.assigned?.potenciaElectricaKw || "-"}</p>
+            <p><span>Tipo de cambio</span>{item.assigned?.tipoCambio || "-"}</p>
             <p><span>Consumo</span>{item.assigned?.consumoElectricoKwh100 || item.assigned?.consumoLitros100 || "-"}</p>
             <p><span>Source URL</span>{item.assigned?.source_url || "-"}</p>
           </div>
         </div>
         <h3>Explicacion del match</h3>
         <p className="explain">{item.explicacion_match}</p>
+        <details className="debug-box">
+          <summary>Debug de matching</summary>
+          <pre>{JSON.stringify({
+            userFeatures: item.userFeatures,
+            candidatePoolSizeBeforeBrandFilter: item.matchDebug?.candidatePoolSizeBeforeBrandFilter,
+            candidatePoolSizeAfterBrandFilter: item.matchDebug?.candidatePoolSizeAfterBrandFilter,
+            candidatePoolSizeAfterModelFilter: item.matchDebug?.candidatePoolSizeAfterModelFilter,
+            topDiscardedCandidates: item.matchDebug?.topDiscardedCandidates,
+            topCandidates: item.matchDebug?.topCandidates
+          }, null, 2)}</pre>
+        </details>
       </section>
     </div>
   );

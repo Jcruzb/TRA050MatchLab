@@ -3,15 +3,16 @@ const TERM_REPLACEMENTS = [
   [/\bts\b/g, "touring sport"],
   [/\bhb\b/g, "hatchback"],
   [/\bsedan\b/g, "sedan"],
-  [/\bsedan\b/g, "sedan"],
   [/\bauto(matico)?\b/g, "automatico"],
+  [/\baut\b/g, "automatico"],
   [/\belectricos? puros?\b/g, "electrico puro"],
-  [/\belectrico(s)?\b/g, "electrico puro"],
+  [/\belectricos?\b/g, "electrico puro"],
   [/\bdiesel\b/g, "diesel"],
-  [/\bdiesel\b/g, "diesel"],
+  [/\bdi\b/g, "diesel"],
   [/\bphev\b/g, "enchufable"],
   [/\bhev\b/g, "hibrido normal"],
-  [/\bhibrido\b/g, "hibrido"]
+  [/\bhibrido\b/g, "hibrido"],
+  [/\butl\b/g, "utilitario"]
 ];
 
 export function normalizeText(value = "") {
@@ -20,7 +21,7 @@ export function normalizeText(value = "") {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[ºª]/g, "")
-    .replace(/[()_[\]{}.,;:|/\\+*]/g, " ")
+    .replace(/[()_[\]{}.,;:|/\\+*.]/g, " ")
     .replace(/[‐‑‒–—-]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -71,6 +72,7 @@ export function parseLooseDate(value) {
     const date = new Date(year, Number(parts[2]) - 1, Number(parts[1]));
     return Number.isNaN(date.valueOf()) ? null : date;
   }
+  if (/^\d{4}$/.test(raw)) return new Date(Number(raw), 0, 1);
   const date = new Date(raw);
   return Number.isNaN(date.valueOf()) ? null : date;
 }
