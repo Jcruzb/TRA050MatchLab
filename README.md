@@ -53,3 +53,4 @@ El emparejamiento TRA050 entre vendido y comprado queda preparado para una fase 
 ## Evidencias IDAE
 
 La exportación `manifest de evidencias IDAE` genera un JSON para un futuro script Node/Playwright que tomará pantallazos de las fichas IDAE. Ese script no se integra en el HTML porque depende de Node, filesystem y Playwright.
+# TRA050MatchLab
