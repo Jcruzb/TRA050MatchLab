@@ -261,6 +261,8 @@ export function featuresFromUser(row, brandIndex, modelBrandIndex) {
   }
   return {
     rawText,
+    datasetType: row.dataset_type || "",
+    expectedPowertrain: row.expected_powertrain || "",
     normalizedText,
     brand: brandResult.brand,
     brandConfidence: brandResult.confidence,

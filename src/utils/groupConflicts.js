@@ -32,6 +32,8 @@ export function groupConflictResults(items) {
       const group = groups.get(groupKey) || {
         groupKey,
         label: item.input?.Marca_modelo_Nuevo || item.userFeatures?.rawText || "Conflicto sin modelo",
+        datasetType: item.dataset_type || item.input?.dataset_type || "",
+        datasetLabel: (item.dataset_type || item.input?.dataset_type) === "sold_thermal" ? "Vehículos vendidos/térmicos" : "Vehículos comprados/eléctricos",
         status: item.match_estado,
         vehicles: [],
         groupSize: 0,

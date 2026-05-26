@@ -2,8 +2,10 @@ import { Check, CopyCheck, Eye, Search, Users, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { MATCH_MEANINGS } from "../utils/matchEngine.js";
 import { normalizeText } from "../utils/normalize.js";
+import CandidateOptionCard from "./CandidateOptionCard.jsx";
+import CandidateSelector from "./CandidateSelector.jsx";
 
-function GlobalDbSearchModal({ group, index, onClose, onAssignGroup }) {
+function GlobalDbSearchModal({ group, index, onClose, onAssignGroup, onAssign }) {
   const [filters, setFilters] = useState({ text: "", brand: "", model: "", motorizacion: "", cilindrada: "", year: "", cambio: "" });
   const results = useMemo(() => {
     const text = normalizeText(filters.text);
@@ -55,7 +57,14 @@ function GlobalDbSearchModal({ group, index, onClose, onAssignGroup }) {
                 <span>{candidate.marcaDetectada || "-"} · {candidate.modelBase || "-"} · {candidate.motorizacion || "-"} · {candidate.cilindradaCc || "-"} cc · {candidate.potenciaCv || "-"} cv · {candidate.tipoCambio || "-"} · {candidate.consumoElectricoKwh100 || candidate.consumoLitros100 || "-"}</span>
                 <span>{candidate.source_url || ""}</span>
               </div>
-              <button className="small" onClick={() => { onAssignGroup(group, candidate.id_idae, "global-search"); onClose(); }}>Asignar a este grupo</button>
+              <div className="button-row">
+                <button className="small" onClick={() => { onAssignGroup(group, candidate.id_idae, "global-search"); onClose(); }}>Asignar a este grupo</button>
+                {group.vehicles.slice(0, 4).map((vehicle) => (
+                  <button className="small ghost" key={vehicle.rowId} onClick={() => onAssign(vehicle.rowId, candidate.id_idae, true, candidate)}>
+                    Asignar solo {vehicle.matricula}
+                  </button>
+                ))}
+              </div>
             </article>
           ))}
         </div>
@@ -78,6 +87,7 @@ export default function ConflictResolver({
   const [selectedByGroup, setSelectedByGroup] = useState({});
   const [expanded, setExpanded] = useState({});
   const [manualGroup, setManualGroup] = useState(null);
+  const [selectorGroup, setSelectorGroup] = useState(null);
   const targets = groups || [];
   const selection = useMemo(() => Object.fromEntries(targets.map((group) => [
     group.groupKey,
@@ -97,7 +107,7 @@ export default function ConflictResolver({
           <article className="conflict-item conflict-group" key={group.groupKey}>
             <div className="group-heading">
               <div>
-                <p className="eyebrow">Grupo de conflicto</p>
+                <p className="eyebrow">Grupo de conflicto — {group.datasetLabel}</p>
                 <strong>{group.label}</strong>
                 <p className="muted">
                   <Users size={15} /> {group.groupSize} vehiculos afectados · Matriculas: {group.vehicles.map((vehicle) => vehicle.matricula).join(", ")}
@@ -119,17 +129,25 @@ export default function ConflictResolver({
               <span>Cambio: {group.detectedFeatures.cambio || "-"}</span>
             </div>
 
-            <select value={selection[group.groupKey]} onChange={(e) => setSelectedByGroup((current) => ({ ...current, [group.groupKey]: e.target.value }))}>
-              {group.candidateOptions.map((candidate) => (
-                <option value={candidate.id_idae} key={candidate.id_idae}>
-                  {candidate.score} · {candidate.id_idae} · {candidate.marcaDetectada || "-"} {candidate.modeloOriginal} · {candidate.cilindradaCc || "-"} cc · {candidate.motorizacion || "-"} · {candidate.potenciaCv || "-"} cv · {candidate.tipoCambio || "-"} · {candidate.consumoElectricoKwh100 || candidate.consumoLitros100 || "-"}
-                </option>
-              ))}
-            </select>
+            <div className="current-candidate">
+              <h3>Candidato seleccionado</h3>
+              {group.candidateOptions.find((candidate) => candidate.id_idae === selection[group.groupKey]) ? (
+                <CandidateOptionCard
+                  candidate={group.candidateOptions.find((candidate) => candidate.id_idae === selection[group.groupKey])}
+                  userFeatures={group.vehicles[0].matchResult.userFeatures}
+                  selected
+                  onSelect={() => onAssignGroup(group, selection[group.groupKey], "manual-selection")}
+                  actionLabel="Aplicar al grupo"
+                />
+              ) : (
+                <p className="muted">No hay candidato sugerido.</p>
+              )}
+            </div>
 
             <div className="button-row">
               <button className="small" onClick={() => onAssignGroup(group, group.suggestedCandidate?.id_idae || selection[group.groupKey], "suggested")}><Check size={16} /> Usar sugerido para todo el grupo</button>
               <button className="small ghost" onClick={() => onAssignGroup(group, selection[group.groupKey], "manual-selection")}><Check size={16} /> Aplicar seleccion a todo el grupo</button>
+              <button className="small ghost" onClick={() => setSelectorGroup(group)}>Cambiar candidato</button>
               <button className="small ghost" onClick={() => setManualGroup(group)}><Search size={16} /> Buscar manualmente en toda la DB</button>
               <button className="small ghost" onClick={() => onMarkGroupMissing(group)}>Vehiculo no encontrado en la DB</button>
               <button className="small ghost" onClick={() => setExpanded((current) => ({ ...current, [group.groupKey]: !current[group.groupKey] }))}>Resolver individualmente</button>
@@ -160,7 +178,19 @@ export default function ConflictResolver({
           </article>
         ))}
       </div>
-      {manualGroup && <GlobalDbSearchModal group={manualGroup} index={index} onClose={() => setManualGroup(null)} onAssignGroup={onAssignGroup} />}
+      {selectorGroup && (
+        <CandidateSelector
+          group={selectorGroup}
+          selectedCandidateId={selection[selectorGroup.groupKey]}
+          userFeatures={selectorGroup.vehicles[0].matchResult.userFeatures}
+          onClose={() => setSelectorGroup(null)}
+          onSelectCandidate={(candidate) => setSelectedByGroup((current) => ({ ...current, [selectorGroup.groupKey]: candidate.id_idae }))}
+          onApplyToGroup={(candidate) => { onAssignGroup(selectorGroup, candidate.id_idae, "manual-selection"); setSelectorGroup(null); }}
+          onOpenManualSearch={() => { setManualGroup(selectorGroup); setSelectorGroup(null); }}
+          onMarkGroupMissing={() => { onMarkGroupMissing(selectorGroup); setSelectorGroup(null); }}
+        />
+      )}
+      {manualGroup && <GlobalDbSearchModal group={manualGroup} index={index} onClose={() => setManualGroup(null)} onAssignGroup={onAssignGroup} onAssign={onAssign} />}
     </section>
   );
 }

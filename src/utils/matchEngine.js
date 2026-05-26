@@ -5,6 +5,8 @@ import {
   normalizeIdaeVehicle
 } from "./extractVehicleFeatures.js";
 import { normalizeText, tokenSimilarity } from "./normalize.js";
+import { applyLearningRules } from "../engine/vehicleLearning.js";
+import { explainableVectorScore } from "../engine/vehicleScoring.js";
 
 export const MATCH_STATES = {
   exacto: "Match exacto",
@@ -183,6 +185,7 @@ function compareValue(user, db, tolerance, label, weight, explanation) {
 
 export function scoreCandidate(user, candidate) {
   const explanation = [];
+  const vector = explainableVectorScore(user, candidate);
   let score = 0;
   let excludeFromNormalCandidates = false;
   const brandOk = !user.brand || !candidate.marcaDetectada || user.brand === candidate.marcaDetectada;
@@ -222,6 +225,15 @@ export function scoreCandidate(user, candidate) {
   if (!user.carroceria || !candidate.carroceriaDetectada) score += 1;
   else if (user.carroceria === candidate.carroceriaDetectada) score += 3;
 
+  if (user.expectedPowertrain === "electric" && candidate.motorizacion && candidate.motorizacion !== "electrico puro") {
+    score -= 22;
+    explanation.push("Penalizado: este dataset espera vehículo eléctrico puro y el candidato no lo parece.");
+  }
+  if (user.expectedPowertrain === "thermal_or_hybrid" && candidate.motorizacion === "electrico puro") {
+    score -= 22;
+    explanation.push("Penalizado: este dataset espera vehículo vendido térmico/híbrido y el candidato parece eléctrico puro.");
+  }
+
   if (user.brand && candidate.marcaDetectada && user.brand !== candidate.marcaDetectada) {
     score = Math.min(score, 25);
     excludeFromNormalCandidates = true;
@@ -234,6 +246,8 @@ export function scoreCandidate(user, candidate) {
     ...candidate,
     score: Math.max(0, Math.min(100, Math.round(score))),
     excludeFromNormalCandidates,
+    matchedFeatures: vector.matchedFeatures,
+    penalties: vector.rejectedFeatures,
     explicacion: explanation.join(" ")
   };
 }
@@ -281,8 +295,43 @@ function cloneMatchForRow(cached, row, rowIndex) {
   };
 }
 
-export function matchVehicle(row, rowIndex, index) {
+export function matchVehicle(row, rowIndex, index, learningRules = []) {
   const userFeatures = featuresFromUser(row, index.brandIndex, index.modelBrandIndex);
+  const learned = applyLearningRules(userFeatures, learningRules);
+  if (learned) {
+    const candidate = index.find((entry) => entry.id_idae === learned.selectedIdIdae);
+    if (candidate) {
+      return {
+        id: `${row.Matricula_Nuevo || "fila"}-${rowIndex}`,
+        rowIndex,
+        input: row,
+        userFeatures,
+        matchDebug: {
+          rawInput: userFeatures.rawText,
+          normalizedTokens: userFeatures.modelTokens,
+          inferredBrand: userFeatures.brand,
+          brandConfidence: userFeatures.brandConfidence,
+          modelBase: userFeatures.modelBase,
+          year: userFeatures.year,
+          learningRuleApplied: learned.id,
+          topCandidates: [{ id_idae: candidate.id_idae, modeloOriginal: candidate.modeloOriginal, score: 100 }]
+        },
+        candidates: [{ ...candidate, score: 100, explicacion: "Coincidencia aplicada por aprendizaje local." }],
+        assigned: candidate,
+        match_estado: MATCH_STATES.exacto,
+        match_score: 100,
+        match_significado: MATCH_MEANINGS[MATCH_STATES.exacto],
+        explicacion_match: "Coincidencia aplicada por aprendizaje local: este patron fue resuelto anteriormente por el usuario.",
+        conflictos_detectados: "",
+        match_manual: false,
+        vehiculo_no_encontrado_db: false,
+        learning_rule_applied: true,
+        learning_rule_id: learned.id,
+        reference: null,
+        notes: ""
+      };
+    }
+  }
   const { pool, debug } = getCandidatePool(userFeatures, index);
   const candidates = pool
     .map((candidate) => scoreCandidate(userFeatures, candidate))
@@ -320,30 +369,34 @@ export function matchVehicle(row, rowIndex, index) {
     conflictos_detectados: debug.warning || (closeConflict ? "Candidatos con puntuacion muy cercana dentro de la misma familia." : ""),
     match_manual: false,
     vehiculo_no_encontrado_db: false,
+    matched_features: best?.matchedFeatures?.join(", ") || "",
+    penalties: best?.penalties?.join(", ") || "",
+    learning_rule_applied: false,
+    learning_rule_id: "",
     reference: null,
     notes: ""
   };
 }
 
-export function matchVehicleWithCache(row, rowIndex, index) {
+export function matchVehicleWithCache(row, rowIndex, index, learningRules = []) {
   const key = buildInputSignature(row);
   if (index.candidateCache.has(key)) return cloneMatchForRow(index.candidateCache.get(key), row, rowIndex);
-  const result = matchVehicle(row, rowIndex, index);
+  const result = matchVehicle(row, rowIndex, index, learningRules);
   index.candidateCache.set(key, { ...result, input: null, id: "cached", rowIndex: -1 });
   return result;
 }
 
-export function matchRows(rows, index) {
-  return rows.map((row, rowIndex) => matchVehicleWithCache(row, rowIndex, index));
+export function matchRows(rows, index, learningRules = []) {
+  return rows.map((row, rowIndex) => matchVehicleWithCache(row, rowIndex, index, learningRules));
 }
 
-export async function matchRowsInChunks(rows, index, onProgress, signal) {
+export async function matchRowsInChunks(rows, index, onProgress, signal, learningRules = []) {
   const results = [];
   const chunkSize = rows.length > 3000 ? 25 : MATCH_CHUNK_SIZE;
   for (let i = 0; i < rows.length; i += chunkSize) {
     if (signal?.cancelled) throw new Error("Procesamiento cancelado por el usuario.");
     const chunk = rows.slice(i, i + chunkSize);
-    results.push(...chunk.map((row, offset) => matchVehicleWithCache(row, i + offset, index)));
+    results.push(...chunk.map((row, offset) => matchVehicleWithCache(row, i + offset, index, learningRules)));
     const processed = Math.min(i + chunk.length, rows.length);
     onProgress?.({
       stage: "Ejecutando matching",

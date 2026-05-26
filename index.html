@@ -6,7 +6,50 @@
     <title>TRA050 MatchLab</title>
   </head>
   <body>
+    <div id="boot-loader" class="boot-loader" role="status" aria-live="polite">
+      <div class="boot-card">
+        <div class="boot-spinner"></div>
+        <strong>TRA050 MatchLab</strong>
+        <p>Cargando base local IDAE y preparando el motor de matching...</p>
+      </div>
+    </div>
     <div id="root"></div>
+    <style>
+      .boot-loader {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: grid;
+        place-items: center;
+        padding: 18px;
+        background: linear-gradient(180deg, #eef4f8 0, #f7f8fa 100%);
+        color: #1a2433;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .boot-card {
+        width: min(420px, 100%);
+        display: grid;
+        gap: 10px;
+        justify-items: center;
+        padding: 26px;
+        background: #fff;
+        border: 1px solid #dfe7ec;
+        border-radius: 8px;
+        box-shadow: 0 24px 80px rgba(23,35,52,.16);
+        text-align: center;
+      }
+      .boot-card strong { font-size: 22px; }
+      .boot-card p { margin: 0; color: #66758a; }
+      .boot-spinner {
+        width: 40px;
+        height: 40px;
+        border: 4px solid #dbe6ec;
+        border-top-color: #116149;
+        border-radius: 50%;
+        animation: boot-spin .8s linear infinite;
+      }
+      @keyframes boot-spin { to { transform: rotate(360deg); } }
+    </style>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

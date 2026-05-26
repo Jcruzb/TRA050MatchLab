@@ -35,12 +35,23 @@ export default function VehicleDetailModal({ item, onClose }) {
         <details className="debug-box">
           <summary>Debug de matching</summary>
           <pre>{JSON.stringify({
-            userFeatures: item.userFeatures,
-            candidatePoolSizeBeforeBrandFilter: item.matchDebug?.candidatePoolSizeBeforeBrandFilter,
-            candidatePoolSizeAfterBrandFilter: item.matchDebug?.candidatePoolSizeAfterBrandFilter,
-            candidatePoolSizeAfterModelFilter: item.matchDebug?.candidatePoolSizeAfterModelFilter,
-            topDiscardedCandidates: item.matchDebug?.topDiscardedCandidates,
-            topCandidates: item.matchDebug?.topCandidates
+            rawInput: item.matchDebug?.rawInput || item.userFeatures?.rawText,
+            normalizedTokens: item.matchDebug?.normalizedTokens || item.userFeatures?.modelTokens,
+            inferredBrand: item.matchDebug?.inferredBrand || item.userFeatures?.brand,
+            brandConfidence: item.matchDebug?.brandConfidence || item.userFeatures?.brandConfidence,
+            modelBase: item.matchDebug?.modelBase || item.userFeatures?.modelBase,
+            year: item.matchDebug?.year || item.userFeatures?.year,
+            rejectedModelTokens: item.matchDebug?.rejectedModelTokens || item.userFeatures?.rejectedModelTokens,
+            candidateRetrievalPhase: item.matchDebug?.candidateRetrievalPhase,
+            vectorScore: item.match_score,
+            matchedFeatures: item.matched_features || item.assigned?.matchedFeatures,
+            penalties: item.penalties || item.assigned?.penalties,
+            candidatesBeforeHardGates: item.matchDebug?.candidatesBeforeHardGates,
+            candidatesAfterHardGates: item.matchDebug?.candidatesAfterHardGates,
+            discardedByBrand: item.matchDebug?.discardedByBrand,
+            discardedByModel: item.matchDebug?.discardedByModel,
+            topCandidates: item.matchDebug?.topCandidates,
+            learningRuleApplied: item.learning_rule_id || item.matchDebug?.learningRuleApplied
           }, null, 2)}</pre>
         </details>
       </section>
