@@ -60,6 +60,7 @@ export function downloadSoldTemplate() {
     "Carroceria_Vendido",
     "Version_Acabado_Vendido",
     "Anio_Modelo_MY_Vendido",
+    "Kilometraje_Promedio_Anual",
     "Observaciones_Vendido"
   ];
   const example = [
@@ -77,6 +78,7 @@ export function downloadSoldTemplate() {
     "turismo",
     "Advance",
     "MY20",
+    "20000",
     "Ejemplo vendido térmico"
   ];
   const wb = XLSX.utils.book_new();

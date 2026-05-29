@@ -1,9 +1,9 @@
-import { Check, CopyCheck, Eye, Search, Users, X } from "lucide-react";
+import { Check, Eye, Search, Users, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { MATCH_MEANINGS } from "../utils/matchEngine.js";
 import { normalizeText } from "../utils/normalize.js";
-import CandidateOptionCard from "./CandidateOptionCard.jsx";
 import CandidateSelector from "./CandidateSelector.jsx";
+import CandidateCarousel from "./CandidateCarousel.jsx";
 
 function GlobalDbSearchModal({ group, index, onClose, onAssignGroup, onAssign }) {
   const [filters, setFilters] = useState({ text: "", brand: "", model: "", motorizacion: "", cilindrada: "", year: "", cambio: "" });
@@ -88,6 +88,7 @@ export default function ConflictResolver({
   const [expanded, setExpanded] = useState({});
   const [manualGroup, setManualGroup] = useState(null);
   const [selectorGroup, setSelectorGroup] = useState(null);
+  const [pendingNoDbGroup, setPendingNoDbGroup] = useState(null);
   const targets = groups || [];
   const selection = useMemo(() => Object.fromEntries(targets.map((group) => [
     group.groupKey,
@@ -95,6 +96,10 @@ export default function ConflictResolver({
   ])), [targets, selectedByGroup]);
 
   if (!targets.length) return null;
+
+  function confirmMarkGroupMissing(group) {
+    setPendingNoDbGroup(group);
+  }
 
   return (
     <section className="panel">
@@ -131,27 +136,20 @@ export default function ConflictResolver({
 
             <div className="current-candidate">
               <h3>Candidato seleccionado</h3>
-              {group.candidateOptions.find((candidate) => candidate.id_idae === selection[group.groupKey]) ? (
-                <CandidateOptionCard
-                  candidate={group.candidateOptions.find((candidate) => candidate.id_idae === selection[group.groupKey])}
-                  userFeatures={group.vehicles[0].matchResult.userFeatures}
-                  selected
-                  onSelect={() => onAssignGroup(group, selection[group.groupKey], "manual-selection")}
-                  actionLabel="Aplicar al grupo"
-                />
-              ) : (
-                <p className="muted">No hay candidato sugerido.</p>
-              )}
+              <CandidateCarousel
+                candidates={group.candidateOptions}
+                selectedCandidateId={selection[group.groupKey]}
+                userFeatures={group.vehicles[0].matchResult.userFeatures}
+                onSelectCandidate={(candidate) => setSelectedByGroup((current) => ({ ...current, [group.groupKey]: candidate.id_idae }))}
+              />
             </div>
 
             <div className="button-row">
               <button className="small" onClick={() => onAssignGroup(group, group.suggestedCandidate?.id_idae || selection[group.groupKey], "suggested")}><Check size={16} /> Usar sugerido para todo el grupo</button>
-              <button className="small ghost" onClick={() => onAssignGroup(group, selection[group.groupKey], "manual-selection")}><Check size={16} /> Aplicar seleccion a todo el grupo</button>
-              <button className="small ghost" onClick={() => setSelectorGroup(group)}>Cambiar candidato</button>
+              <button className="small ghost" onClick={() => onAssignGroup(group, selection[group.groupKey], "manual-selection")}><Check size={16} /> Aplicar candidato seleccionado a todo el grupo</button>
               <button className="small ghost" onClick={() => setManualGroup(group)}><Search size={16} /> Buscar manualmente en toda la DB</button>
-              <button className="small ghost" onClick={() => onMarkGroupMissing(group)}>Vehiculo no encontrado en la DB</button>
+              <button className="small ghost" onClick={() => confirmMarkGroupMissing(group)}>Marcar grupo como no encontrado en DB</button>
               <button className="small ghost" onClick={() => setExpanded((current) => ({ ...current, [group.groupKey]: !current[group.groupKey] }))}>Resolver individualmente</button>
-              <button className="small ghost" onClick={() => onApplySimilar(group.vehicles[0].matchResult)}><CopyCheck size={16} /> Aplicar a similares</button>
             </div>
 
             <details className="debug-box">
@@ -168,7 +166,7 @@ export default function ConflictResolver({
                     <div className="button-row">
                       <button className="icon" onClick={() => onSelect(vehicle.matchResult)} title="Ver detalle"><Eye size={16} /></button>
                       <button className="small ghost" onClick={() => onAssign(vehicle.rowId, selection[group.groupKey], true)}>Aplicar solo a esta fila</button>
-                      <button className="small ghost" onClick={() => onMarkMissing(vehicle.rowId)}>No encontrado solo esta fila</button>
+                      <button className="small ghost" onClick={() => onMarkMissing(vehicle.rowId)}>Marcar solo este vehiculo como no encontrado en DB</button>
                       <button className="small ghost" onClick={() => onResolveIndividually(vehicle.rowId)}>Separar del grupo</button>
                     </div>
                   </article>
@@ -187,10 +185,24 @@ export default function ConflictResolver({
           onSelectCandidate={(candidate) => setSelectedByGroup((current) => ({ ...current, [selectorGroup.groupKey]: candidate.id_idae }))}
           onApplyToGroup={(candidate) => { onAssignGroup(selectorGroup, candidate.id_idae, "manual-selection"); setSelectorGroup(null); }}
           onOpenManualSearch={() => { setManualGroup(selectorGroup); setSelectorGroup(null); }}
-          onMarkGroupMissing={() => { onMarkGroupMissing(selectorGroup); setSelectorGroup(null); }}
+          onMarkGroupMissing={() => { confirmMarkGroupMissing(selectorGroup); setSelectorGroup(null); }}
         />
       )}
       {manualGroup && <GlobalDbSearchModal group={manualGroup} index={index} onClose={() => setManualGroup(null)} onAssignGroup={onAssignGroup} onAssign={onAssign} />}
+      {pendingNoDbGroup && (
+        <div className="modal-backdrop" onClick={() => setPendingNoDbGroup(null)}>
+          <section className="modal" onClick={(event) => event.stopPropagation()}>
+            <button className="icon close" onClick={() => setPendingNoDbGroup(null)}><X size={18} /></button>
+            <h2>Marcar grupo como no encontrado en DB</h2>
+            <p>Vas a marcar {pendingNoDbGroup.groupSize} vehiculos de este grupo como "Vehiculo no encontrado en la DB".</p>
+            <p className="muted">Se eliminara cualquier candidato IDAE asignado y se usara referencia TRA050 cuando sea posible.</p>
+            <div className="button-row">
+              <button className="ghost" onClick={() => setPendingNoDbGroup(null)}>Cancelar</button>
+              <button onClick={() => { onMarkGroupMissing(pendingNoDbGroup); setPendingNoDbGroup(null); }}>Marcar todo el grupo</button>
+            </div>
+          </section>
+        </div>
+      )}
     </section>
   );
 }

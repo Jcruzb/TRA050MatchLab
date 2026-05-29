@@ -59,6 +59,7 @@ const CANONICAL_FIELDS = {
   carroceria: ["carroceria_nuevo", "carroceria_vendido", "carroceria_comprado", "carroceria"],
   version_acabado: ["version_acabado_nuevo", "version_acabado_vendido", "version_acabado_comprado", "version_acabado"],
   anio_modelo_my: ["anio_modelo_my_nuevo", "anio_modelo_my_vendido", "anio_modelo_my_comprado", "anio_modelo_my"],
+  kilometraje_promedio_anual: ["kilometraje_promedio_anual", "kilometraje_promedio_anual_vendido", "l_km_anio", "l_km_año", "km_anio", "km_año"],
   observaciones: ["observaciones_nuevo", "observaciones_vendido", "observaciones_comprado", "observaciones"]
 };
 
@@ -103,6 +104,8 @@ export function normalizeDatasetRows(rows, config) {
         Carroceria_Nuevo: canonical.carroceria,
         Version_Acabado_Nuevo: canonical.version_acabado,
         Anio_Modelo_MY_Nuevo: canonical.anio_modelo_my,
+        Kilometraje_Promedio_Anual: canonical.kilometraje_promedio_anual,
+        L_km_anio: canonical.kilometraje_promedio_anual,
         Observaciones_Nuevo: canonical.observaciones
       };
     })

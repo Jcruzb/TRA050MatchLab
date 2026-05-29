@@ -1,6 +1,6 @@
 import { Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
-import CandidateOptionCard from "./CandidateOptionCard.jsx";
+import CandidateCarousel from "./CandidateCarousel.jsx";
 import { candidateSearchText } from "../utils/formatVehicleCandidate.js";
 
 export default function CandidateSelector({
@@ -16,8 +16,6 @@ export default function CandidateSelector({
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("score");
   const [limit, setLimit] = useState(5);
-  const selected = group.candidateOptions.find((candidate) => candidate.id_idae === selectedCandidateId) || group.suggestedCandidate;
-
   const candidates = useMemo(() => {
     const q = query.trim();
     const filtered = group.candidateOptions.filter((candidate) => !q || candidateSearchText(candidate).includes(q.toLowerCase()));
@@ -37,15 +35,6 @@ export default function CandidateSelector({
         <h2>Seleccionar candidato IDAE</h2>
         <p className="muted">{group.label} · {group.groupSize} vehiculos afectados</p>
 
-        <section className="selected-candidate-summary">
-          <h3>Candidato seleccionado</h3>
-          {selected ? (
-            <CandidateOptionCard candidate={selected} userFeatures={userFeatures} selected onSelect={(candidate) => onApplyToGroup(candidate)} actionLabel="Aplicar al grupo" />
-          ) : (
-            <p className="muted">No hay candidato seleccionado.</p>
-          )}
-        </section>
-
         <div className="candidate-toolbar">
           <label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar dentro de candidatos sugeridos..." /></label>
           <select value={sort} onChange={(event) => setSort(event.target.value)}>
@@ -57,23 +46,16 @@ export default function CandidateSelector({
           </select>
         </div>
 
-        <div className="candidate-list">
-          {candidates.slice(0, limit).map((candidate) => (
-            <CandidateOptionCard
-              key={candidate.id_idae}
-              candidate={candidate}
-              userFeatures={userFeatures}
-              selected={candidate.id_idae === selectedCandidateId}
-              onSelect={onSelectCandidate}
-            />
-          ))}
-        </div>
+        <CandidateCarousel candidates={candidates.slice(0, limit)} selectedCandidateId={selectedCandidateId} userFeatures={userFeatures} onSelectCandidate={onSelectCandidate} />
 
         <div className="button-row selector-actions">
           {limit < candidates.length && <button className="ghost" onClick={() => setLimit((value) => value + 5)}>Ver más candidatos</button>}
-          <button onClick={() => selected && onApplyToGroup(selected)}>Aplicar selección al grupo</button>
+          <button onClick={() => {
+            const selected = candidates.find((candidate) => candidate.id_idae === selectedCandidateId) || candidates[0];
+            if (selected) onApplyToGroup(selected);
+          }}>Aplicar candidato seleccionado a todo el grupo</button>
           <button className="ghost" onClick={onOpenManualSearch}>Buscar manualmente en toda la DB</button>
-          <button className="ghost" onClick={onMarkGroupMissing}>Vehículo no encontrado en la DB</button>
+          <button className="ghost" onClick={onMarkGroupMissing}>Marcar grupo como no encontrado en DB</button>
         </div>
       </section>
     </div>

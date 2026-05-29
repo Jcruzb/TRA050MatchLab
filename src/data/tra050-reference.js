@@ -27,7 +27,7 @@ export const TRA050_REFERENCIAS_CONSUMO = {
         { tipologia: "M1 - turismo", combustible: "diésel", consumo: 6.99, unidad: "L/100km" },
         { tipologia: "M1 - turismo", combustible: "GLP", consumo: 6.45, unidad: "L/100km" },
         { tipologia: "M1 - turismo", combustible: "gas natural", consumo: 4.88, unidad: "kg/100km" },
-        { tipologia: "M1 - turismo", combustible: "híbrido gasolina", consumo: 5.135, unidad: "L/100km" },
+        { tipologia: "M1 - turismo", combustible: "híbrido gasolina", consumo: 5.13, unidad: "L/100km" },
         { tipologia: "M1 - turismo", combustible: "híbrido diésel", consumo: 5.18, unidad: "L/100km" },
         { tipologia: "N1 - furgonetas pequeñas", combustible: "gasolina", consumo: 7.05, unidad: "L/100km" },
         { tipologia: "N1 - furgonetas pequeñas", combustible: "diésel", consumo: 5.63, unidad: "L/100km" },

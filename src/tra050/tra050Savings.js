@@ -1,4 +1,5 @@
-import { factorForFuel } from "./tra050Factors.js";
+import { factorForFuel, normalizeFuelForTra050Factor } from "./tra050Factors.js";
+import { resolveTra050AnnualMileage } from "./tra050Mileage.js";
 
 function pick(...values) {
   return values.find((value) => value !== null && value !== undefined && value !== "");
@@ -35,6 +36,42 @@ function inferUnit(value, fallback = "") {
   return fallback || "";
 }
 
+function round(value, digits = 2) {
+  return Number.isFinite(value) ? Number(value.toFixed(digits)) : null;
+}
+
+export function getAnnualMileageForTra050(vehicle, options = {}) {
+  const annex = resolveTra050AnnualMileage(vehicle, options);
+  if (annex.value !== null) return { value: annex.value, source: annex.source, raw: annex.value, typology: annex.typology, reason: annex.reason };
+
+  const raw = pick(
+    vehicle?.input?.kilometraje_promedio_anual,
+    vehicle?.input?.Kilometraje_Promedio_Anual,
+    vehicle?.input?.L_km_anio,
+    vehicle?.input?.l_km_anio,
+    vehicle?.kilometraje_promedio_anual,
+    vehicle?.Kilometraje_Promedio_Anual,
+    vehicle?.L_km_anio
+  );
+  const own = parseNumberFromSpanishUnit(raw);
+  if (own !== null) return { value: own, source: "vehicle", raw, typology: "", reason: "Kilometraje anual informado en la fila." };
+  const global = parseNumberFromSpanishUnit(options.annualMileageKm);
+  if (global !== null) return { value: global, source: "global_default", raw: options.annualMileageKm, typology: "", reason: "Kilometraje anual global por defecto." };
+  return { value: null, source: "", raw: raw || options.annualMileageKm || "", typology: annex.typology, reason: annex.reason };
+}
+
+function getFuelForAnnualSaving(vehicle) {
+  return pick(
+    vehicle?.input?.combustible_motorizacion,
+    vehicle?.input?.Combustible_Motorizacion_Nuevo,
+    vehicle?.combustible_motorizacion,
+    vehicle?.combustible_referencia_tra050,
+    vehicle?.reference?.combustible,
+    vehicle?.userFeatures?.motorizacion,
+    vehicle?.assigned?.motorizacion
+  );
+}
+
 export function getVehicleConsumptionForTra050(vehicle, datasetType = vehicle?.dataset_type || vehicle?.input?.dataset_type || "") {
   const detailElectric = findTechnicalValue(vehicle, ["Consumo eléctrico", "Consumo Electrico", "Consumo eléctrico WLTP"]);
   const detailThermal = findTechnicalValue(vehicle, [
@@ -65,38 +102,72 @@ export function getVehicleConsumptionForTra050(vehicle, datasetType = vehicle?.d
   return { value: null, unit: "", source: "missing", isReference: false, isOfficialIdae: false, is_valid: false, rawValue: "", reason, warnings: ["Consumo no disponible."] };
 }
 
-export function calculateTra050Savings(soldVehicle, purchasedVehicle) {
+export function calculateTra050AnnualSaving(soldVehicle, purchasedVehicle, options = {}) {
   const warnings = [];
+  const errors = [];
   const thermal = getVehicleConsumptionForTra050(soldVehicle, "sold_thermal");
   const electric = getVehicleConsumptionForTra050(purchasedVehicle, "purchased_electric");
   warnings.push(...thermal.warnings, ...electric.warnings);
-  if (thermal.value === null || electric.value === null) {
-    return { ahorro_kwh_100km: null, is_valid: false, warnings, explanation: "No se puede calcular ahorro porque falta consumo." };
-  }
-  if (!String(electric.unit).toLowerCase().includes("kwh")) {
-    warnings.push("El consumo del eléctrico no está en kWh/100km.");
-    return { ahorro_kwh_100km: null, is_valid: false, warnings, explanation: "Unidad eléctrica incompatible." };
-  }
-  const fuel = soldVehicle.input?.combustible_motorizacion || soldVehicle.userFeatures?.motorizacion || soldVehicle.assigned?.motorizacion || soldVehicle.reference?.combustible || "";
+  if (thermal.source === "tra050_reference") warnings.push("consumo_termico_referencia_tra050");
+  if (electric.source === "tra050_reference") warnings.push("consumo_electrico_referencia_tra050");
+
+  const fuel = getFuelForAnnualSaving(soldVehicle);
+  const fuelKey = normalizeFuelForTra050Factor(fuel);
   const factorInfo = factorForFuel(fuel, thermal.unit);
-  if (!factorInfo.factor) {
-    warnings.push(factorInfo.warning);
-    return { ahorro_kwh_100km: null, is_valid: false, warnings, explanation: factorInfo.warning };
-  }
-  const thermalKwh = thermal.value * factorInfo.factor;
-  const ahorro = thermalKwh - electric.value;
-  if (ahorro <= 0) warnings.push("El ahorro calculado es cero o negativo.");
+  const mileage = getAnnualMileageForTra050(soldVehicle, options);
+  if (mileage.source === "global_default") warnings.push("kilometraje_anual_valor_global_por_defecto");
+
+  if (thermal.value === null) errors.push("falta_CVA");
+  if (!fuel) errors.push("falta_combustible");
+  if (!factorInfo.factor) errors.push("factor_conversion_no_configurado");
+  if (electric.value === null) errors.push("falta_CVN");
+  if (electric.value !== null && !String(electric.unit).toLowerCase().includes("kwh")) errors.push("CVN_unidad_no_kwh_100km");
+  if (mileage.value === null) errors.push("falta_kilometraje_anual");
+
+  const cvaKwh = errors.includes("falta_CVA") || errors.includes("factor_conversion_no_configurado") ? null : thermal.value * factorInfo.factor;
+  const ahorro100 = cvaKwh === null || electric.value === null ? null : cvaKwh - electric.value;
+  const ahorroYear = ahorro100 === null || mileage.value === null ? null : (ahorro100 / 100) * mileage.value;
+
+  if (ahorro100 !== null && ahorro100 <= 0) warnings.push("ahorro_kwh_100km_no_positivo");
+  if (ahorroYear !== null && ahorroYear <= 0) warnings.push("ahorro_kwh_anio_no_positivo");
+
+  const explanation = errors.length
+    ? `Calculo pendiente: ${errors.join(", ")}.`
+    : `Consumo del vehiculo antiguo: ${thermal.value} ${thermal.unit}. Factor aplicado: ${factorInfo.factor.toFixed(2)} ${factorInfo.unit}. Consumo convertido: ${cvaKwh.toFixed(2)} kWh/100km. Consumo del vehiculo nuevo: ${electric.value} kWh/100km. Kilometraje anual: ${mileage.value.toLocaleString("es-ES")} km/año. Ahorro anual calculado: ${ahorroYear.toLocaleString("es-ES", { maximumFractionDigits: 2 })} kWh/año.`;
+
   return {
-    ahorro_kwh_100km: Number(ahorro.toFixed(2)),
+    is_valid: errors.length === 0,
+    cva_original_value: thermal.value,
+    cva_original_unit: thermal.unit,
+    cva_fuel_type: fuelKey || fuel || "",
+    conversion_factor: factorInfo.factor,
+    conversion_factor_unit: factorInfo.unit,
+    cva_kwh_100km: round(cvaKwh, 4),
+    cvn_kwh_100km: electric.value,
+    annual_mileage_km: mileage.value,
+    annual_mileage_source: mileage.source,
+    annual_mileage_typology: mileage.typology,
+    annual_mileage_reason: mileage.reason,
+    ahorro_kwh_100km: round(ahorro100, 4),
+    ahorro_kwh_year: round(ahorroYear, 2),
+    formula: "AE_TOTAL = (((CVA * f) - CVN) / 100) * L",
+    explanation,
+    warnings,
+    errors,
+    calculo_valido: errors.length === 0,
     consumo_termico_original: thermal.value,
-    consumo_termico_kwh_100km: Number(thermalKwh.toFixed(2)),
+    consumo_termico_unidad: thermal.unit,
+    consumo_termico_kwh_100km: round(cvaKwh, 4),
     consumo_electrico_kwh_100km: electric.value,
     factor_conversion_usado: factorInfo.factor,
+    unidad_factor_conversion: factorInfo.unit,
     factor_origen: factorInfo.key,
     consumo_termico_origen: thermal.source,
     consumo_electrico_origen: electric.source,
-    is_valid: warnings.length === 0 || ahorro > 0,
-    warnings,
-    explanation: `Consumo térmico ${thermal.value} ${thermal.unit} × ${factorInfo.factor} = ${thermalKwh.toFixed(2)} kWh/100km. Consumo eléctrico ${electric.value} kWh/100km. Ahorro estimado: ${ahorro.toFixed(2)} kWh/100km.`
+    raw: { thermal, electric, mileage }
   };
+}
+
+export function calculateTra050Savings(soldVehicle, purchasedVehicle, options = {}) {
+  return calculateTra050AnnualSaving(soldVehicle, purchasedVehicle, options);
 }

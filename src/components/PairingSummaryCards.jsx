@@ -9,7 +9,8 @@ export default function PairingSummaryCards({ summary }) {
     ["Pares generados", summary.pairs || 0],
     ["Vendidos sin pareja", summary.unpairedSold || 0],
     ["Electricos sin pareja", summary.unpairedPurchased || 0],
-    ["Ahorro total estimado", `${(summary.totalSavings || 0).toFixed(2)} kWh/100km`],
+    ["Ahorro total estimado", `${(summary.totalSavings || 0).toFixed(2)} kWh/año`],
+    ["Diferencia media", `${(summary.totalSavings100km || 0).toFixed(2)} kWh/100km`],
     ["Pares con advertencias", summary.warningPairs || 0]
   ];
   return (

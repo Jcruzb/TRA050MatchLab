@@ -14,7 +14,7 @@ import ExportPanel from "./components/ExportPanel.jsx";
 import ProcessingOverlay from "./components/ProcessingOverlay.jsx";
 import PairingWorkspace from "./components/PairingWorkspace.jsx";
 import { VEHICLE_DB } from "./data/vehicle-db.js";
-import { TRA050_CONSUMO_REFERENCIA_ANTIGUO_TERMICO, TRA050_CONSUMO_REFERENCIA_NUEVO_ELECTRICO } from "./data/tra050-reference.js";
+import { TRA050_CONSUMO_REFERENCIA_NUEVO_ELECTRICO } from "./data/tra050-reference.js";
 import { buildSearchIndex, matchRowsInChunks, MATCH_MEANINGS, MATCH_STATES } from "./utils/matchEngine.js";
 import { normalizeText } from "./utils/normalize.js";
 import { groupConflictResults } from "./utils/groupConflicts.js";
@@ -22,15 +22,27 @@ import { clearLearningRules, exportLearningRules, importLearningRules, loadLearn
 import { createEmptyDataset, DATASET_CONFIG, validateDatasetRows } from "./utils/datasets.js";
 import { applyPairsToDatasets, autoPairVehicles, buildPairingCandidates, prepareVehiclesForPairing, validatePairingIntegrity } from "./tra050/tra050Pairing.js";
 import { exportFinalTra050Excel } from "./tra050/tra050PairExport.js";
+import { applyTra050ReferenceResolution } from "./tra050/tra050ReferenceResolver.js";
 
 const STORAGE_KEY = "tra050-matchlab-session";
-const DEFAULT_MISSING_REFERENCE = {
-  ...TRA050_CONSUMO_REFERENCIA_NUEVO_ELECTRICO[0],
-  key: "nuevo-M1",
-  consumo: TRA050_CONSUMO_REFERENCIA_NUEVO_ELECTRICO[0].consumo_kwh_100km,
-  unidad: "kWh/100km"
-};
-const EMPTY_PAIRING = { pairs: [], unpairedSold: [], unpairedPurchased: [], candidates: [], warnings: [], summary: {}, integrity: null, updatedAt: null };
+const EMPTY_PAIRING = { pairs: [], unpairedSold: [], unpairedPurchased: [], candidates: [], warnings: [], summary: {}, integrity: null, updatedAt: null, annualMileageKm: "" };
+
+function unpairedReasonFor(item, role, evaluatedCandidates = [], selectedPairs = []) {
+  const id = item.id;
+  const relevant = evaluatedCandidates.filter((candidate) => role === "sold" ? candidate.sold_row_id === id : candidate.purchased_row_id === id);
+  if (!relevant.length) return { unpaired_reason: "no_same_category_counterpart", unpaired_reason_detail: "No se evaluo ninguna contraparte para este vehiculo." };
+  if (!relevant.some((candidate) => candidate.categoryCheck?.valid)) return { unpaired_reason: "no_same_category_counterpart", unpaired_reason_detail: "No tiene contraparte de la misma categoria." };
+  if (!relevant.some((candidate) => candidate.dateWindowCheck?.valid)) return { unpaired_reason: "no_valid_date_window", unpaired_reason_detail: "Todas las contrapartes estan fuera de ventana temporal." };
+  const savingErrors = relevant.flatMap((candidate) => candidate.savingCheck?.errors || []);
+  if (savingErrors.includes("falta_kilometraje_anual")) return { unpaired_reason: "missing_annual_mileage", unpaired_reason_detail: "Falta kilometraje promedio anual L para calcular ahorro." };
+  if (!relevant.some((candidate) => candidate.savingCheck?.valid)) return { unpaired_reason: "missing_consumption", unpaired_reason_detail: "Falta consumo valido o factor para calcular ahorro." };
+  const selectedIds = new Set(selectedPairs.flatMap((pair) => [pair.sold_row_id, pair.purchased_row_id]));
+  const best = relevant.filter((candidate) => candidate.isEligible).sort((a, b) => (b.savingCheck?.ahorro_kwh_year || 0) - (a.savingCheck?.ahorro_kwh_year || 0))[0];
+  if (best && (selectedIds.has(best.sold_row_id) || selectedIds.has(best.purchased_row_id))) {
+    return { unpaired_reason: "already_used_by_higher_saving_pair", unpaired_reason_detail: "La mejor alternativa fue asignada a otra pareja con mayor prioridad de ahorro." };
+  }
+  return { unpaired_reason: "not_selected_by_optimization", unpaired_reason_detail: "Fue sobrante por regla de uso unico y optimizacion." };
+}
 
 function createDatasets() {
   return {
@@ -41,11 +53,71 @@ function createDatasets() {
 
 function defaultReferenceForDataset(config) {
   if (config.type === "sold_thermal") {
-    const item = TRA050_CONSUMO_REFERENCIA_ANTIGUO_TERMICO[0];
-    return { ...item, key: `termico-${item.tipologia}-${item.combustible}` };
+    return null;
   }
   const item = TRA050_CONSUMO_REFERENCIA_NUEVO_ELECTRICO[0];
   return { ...item, key: `nuevo-${item.tipologia}`, consumo: item.consumo || item.consumo_kwh_100km, unidad: item.unidad || "kWh/100km" };
+}
+
+function electricReferenceForNoDbVehicle(item) {
+  const category = String(item.input?.categoria || item.input?.Categoria_nuevo || item.categoria || "").trim().toUpperCase();
+  const reference = TRA050_CONSUMO_REFERENCIA_NUEVO_ELECTRICO.find((entry) => String(entry.tipologia).toUpperCase() === category);
+  if (!reference) return null;
+  return {
+    ...reference,
+    key: `nuevo-${reference.tipologia}`,
+    consumo: reference.consumo || reference.consumo_kwh_100km,
+    unidad: reference.unidad || "kWh/100km"
+  };
+}
+
+function applyNoDbReferenceForDataset(item, datasetType) {
+  if (datasetType === "sold_thermal") return applyTra050ReferenceResolution(item, datasetType);
+  if (datasetType === "purchased_electric") {
+    const reference = electricReferenceForNoDbVehicle(item);
+    if (!reference) {
+      return {
+        ...item,
+        reference: null,
+        consumo_origen: "",
+        tra050_reference_auto_selected: false,
+        tra050_reference_confidence: "low",
+        tra050_reference_reason: "No se pudo inferir referencia electrica TRA050 por categoria."
+      };
+    }
+    return {
+      ...item,
+      reference,
+      consumo_origen: "tra050_reference",
+      consumo_referencia_tra050: reference.consumo,
+      unidad_consumo: reference.unidad,
+      tipologia_referencia_tra050: reference.tipologia,
+      combustible_referencia_tra050: "",
+      tra050_reference_auto_selected: true,
+      tra050_reference_manual_selected: false,
+      tra050_reference_confidence: "high",
+      tra050_reference_reason: `Categoria ${reference.tipologia} detectada; referencia TRA050 electrica seleccionada automaticamente.`,
+      observacion_consumo_referencia: "Referencia TRA050 electrica seleccionada automaticamente por categoria."
+    };
+  }
+  return item;
+}
+
+function resolveNoDbReferencesInDataset(dataset) {
+  return {
+    ...dataset,
+    matchResults: (dataset.matchResults || []).map((item) => {
+      if (!item.vehiculo_no_encontrado_db) return item;
+      if (item.tra050_reference_manual_selected) return item;
+      if (item.dataset_type !== "sold_thermal") return item.reference ? item : applyNoDbReferenceForDataset(item, item.dataset_type);
+      if (item.reference && item.tra050_reference_auto_selected) return item;
+      return applyTra050ReferenceResolution(item, item.dataset_type);
+    })
+  };
+}
+
+function resolveNoDbReferencesInDatasets(datasets) {
+  return Object.fromEntries(Object.entries(datasets).map(([key, dataset]) => [key, resolveNoDbReferencesInDataset(dataset)]));
 }
 
 function addDatasetWarnings(items, config) {
@@ -185,7 +257,7 @@ export default function App() {
       }
       const saved = JSON.parse(savedText || "null");
       if (saved?.datasets) {
-        setDatasets(saved.datasets);
+        setDatasets(resolveNoDbReferencesInDatasets(saved.datasets));
         if (saved.pairing) setPairing(saved.pairing);
       } else if (saved?.items) {
         setDatasets((current) => ({
@@ -193,7 +265,7 @@ export default function App() {
           soldThermal: {
             ...current.soldThermal,
             validation: saved.validation,
-            matchResults: saved.items,
+            matchResults: resolveNoDbReferencesInDataset({ matchResults: saved.items }).matchResults,
             exportReady: Boolean(saved.items?.length)
           }
         }));
@@ -230,11 +302,13 @@ export default function App() {
 
   async function handleRows(rows) {
     cancelRef.current = { cancelled: false };
+    setSelected(null);
     setProcessing({ stage: "Validando estructura", processed: 0, total: rows.length, percent: 0 });
     try {
       await new Promise((resolve) => setTimeout(resolve, 0));
       const result = validateDatasetRows(rows, activeConfig);
-      updateActiveDataset((dataset) => ({ ...dataset, rawRows: rows, normalizedRows: result.rows, validation: result, matchResults: [], exportReady: false }));
+      const tableVersion = Date.now();
+      updateActiveDataset((dataset) => ({ ...dataset, rawRows: rows, normalizedRows: result.rows, validation: result, matchResults: [], exportReady: false, tableVersion }));
       if (result.hasErrors) {
         setToast("Hay errores criticos de estructura. Corrigelos antes de ejecutar matching.");
         setProcessing(null);
@@ -245,8 +319,8 @@ export default function App() {
       const matched = await matchRowsInChunks(engineRows, index, setProcessing, cancelRef.current, learningRules);
       setProcessing({ stage: "Agrupando conflictos", processed: result.rows.length, total: result.rows.length, percent: 100 });
       await new Promise((resolve) => setTimeout(resolve, 0));
-      const matchResults = addDatasetWarnings(matched, activeConfig);
-      updateActiveDataset((dataset) => ({ ...dataset, normalizedRows: result.rows, validation: result, matchResults, conflictGroups: groupConflictResults(matchResults), exportReady: true }));
+      const matchResults = resolveNoDbReferencesInDataset({ matchResults: addDatasetWarnings(matched, activeConfig) }).matchResults;
+      updateActiveDataset((dataset) => ({ ...dataset, normalizedRows: result.rows, validation: result, matchResults, conflictGroups: groupConflictResults(matchResults), exportReady: true, tableVersion }));
       setToast(`Carga procesada: ${result.rows.length} vehiculos.`);
     } catch (error) {
       setToast(error.message || "No se pudo completar el analisis. Revisa el archivo o intenta procesar menos filas.");
@@ -283,7 +357,17 @@ export default function App() {
         match_manual: manual,
         manual_search_used: Boolean(candidateOverride),
         vehiculo_no_encontrado_db: false,
-        reference: null
+        reference: null,
+        consumo_origen: "",
+        consumo_referencia_tra050: "",
+        unidad_consumo: "",
+        tipologia_referencia_tra050: "",
+        combustible_referencia_tra050: "",
+        tra050_reference_auto_selected: false,
+        tra050_reference_manual_selected: false,
+        tra050_reference_confidence: "",
+        tra050_reference_reason: "",
+        observacion_consumo_referencia: ""
       };
     }) }));
   }
@@ -321,6 +405,16 @@ export default function App() {
         manual_search_used: mode === "global-search",
         vehiculo_no_encontrado_db: false,
         reference: null,
+        consumo_origen: "",
+        consumo_referencia_tra050: "",
+        unidad_consumo: "",
+        tipologia_referencia_tra050: "",
+        combustible_referencia_tra050: "",
+        tra050_reference_auto_selected: false,
+        tra050_reference_manual_selected: false,
+        tra050_reference_confidence: "",
+        tra050_reference_reason: "",
+        observacion_consumo_referencia: "",
         conflict_group_key: group.groupKey,
         conflict_group_label: group.label,
         conflict_group_size: group.groupSize,
@@ -334,35 +428,53 @@ export default function App() {
   }
 
   function markMissing(itemId) {
-    updateActiveDataset((dataset) => ({ ...dataset, matchResults: dataset.matchResults.map((item) => item.id === itemId ? {
-      ...item,
+    updateActiveDataset((dataset) => ({ ...dataset, matchResults: dataset.matchResults.map((item) => {
+      if (item.id !== itemId) return item;
+      const missingItem = {
+        ...item,
       assigned: null,
+      id_idae_asignado: null,
+      modelo_idae_asignado: null,
+      source_url_idae: null,
       match_estado: MATCH_STATES.noEncontrado,
       match_score: 0,
       match_significado: MATCH_MEANINGS[MATCH_STATES.noEncontrado],
       explicacion_match: MATCH_MEANINGS[MATCH_STATES.noEncontrado],
       vehiculo_no_encontrado_db: true,
       match_manual: true,
+      manual_search_used: false,
       reference: defaultReferenceForDataset(activeConfig),
-      consumo_origen: "tra050_reference",
+      consumo_origen: activeConfig.type === "sold_thermal" ? "" : "tra050_reference",
+      tra050_reference_manual_selected: false,
+      tra050_reference_auto_selected: false,
       notes: item.notes || "Pendiente de justificar consumo de referencia TRA050."
-    } : item) }));
+      };
+      return applyNoDbReferenceForDataset(missingItem, activeConfig.type);
+    }) }));
   }
 
   function markGroupMissing(group) {
     const timestamp = new Date().toISOString();
     const ids = new Set(group.vehicles.map((vehicle) => vehicle.rowId));
-    updateActiveDataset((dataset) => ({ ...dataset, matchResults: dataset.matchResults.map((item) => ids.has(item.id) ? {
-      ...item,
+    updateActiveDataset((dataset) => ({ ...dataset, matchResults: dataset.matchResults.map((item) => {
+      if (!ids.has(item.id)) return item;
+      const missingItem = {
+        ...item,
       assigned: null,
+      id_idae_asignado: null,
+      modelo_idae_asignado: null,
+      source_url_idae: null,
       match_estado: MATCH_STATES.noEncontrado,
       match_score: 0,
       match_significado: MATCH_MEANINGS[MATCH_STATES.noEncontrado],
       explicacion_match: `Vehiculo no encontrado en DB aplicado al grupo ${group.label}.`,
       vehiculo_no_encontrado_db: true,
       match_manual: true,
+      manual_search_used: false,
       reference: defaultReferenceForDataset(activeConfig),
-      consumo_origen: "tra050_reference",
+      consumo_origen: activeConfig.type === "sold_thermal" ? "" : "tra050_reference",
+      tra050_reference_manual_selected: false,
+      tra050_reference_auto_selected: false,
       notes: item.notes || "Pendiente de justificar consumo de referencia TRA050.",
       conflict_group_key: group.groupKey,
       conflict_group_label: group.label,
@@ -371,8 +483,10 @@ export default function App() {
       group_resolution_key: group.groupKey,
       group_resolution_applied: true,
       group_resolution_timestamp: timestamp,
-      group_resolution_mode: "not-found"
-    } : item) }));
+      group_resolution_mode: "not_found_db"
+      };
+      return applyNoDbReferenceForDataset(missingItem, activeConfig.type);
+    }) }));
   }
 
   function resolveIndividually(itemId) {
@@ -383,8 +497,22 @@ export default function App() {
     } : item) }));
   }
 
-  function updateMissingReference(itemId, reference, notes) {
-    updateActiveDataset((dataset) => ({ ...dataset, matchResults: dataset.matchResults.map((item) => item.id === itemId ? { ...item, reference, notes, consumo_origen: "tra050_reference" } : item) }));
+  function updateMissingReference(itemId, reference, notes, mode = "manual") {
+    updateActiveDataset((dataset) => ({ ...dataset, matchResults: dataset.matchResults.map((item) => item.id === itemId ? {
+      ...item,
+      reference,
+      notes,
+      consumo_origen: reference ? "tra050_reference" : "",
+      consumo_referencia_tra050: reference?.consumo || reference?.consumo_kwh_100km || "",
+      unidad_consumo: reference?.unidad || (reference?.consumo_kwh_100km ? "kWh/100km" : ""),
+      tipologia_referencia_tra050: reference?.tipologia || "",
+      combustible_referencia_tra050: reference?.combustible || "",
+      tra050_reference_auto_selected: mode === "notes" ? Boolean(item.tra050_reference_auto_selected) : false,
+      tra050_reference_manual_selected: mode === "notes" ? Boolean(item.tra050_reference_manual_selected) : Boolean(reference),
+      tra050_reference_confidence: mode === "notes" ? item.tra050_reference_confidence || "" : (reference ? "manual" : item.tra050_reference_confidence || ""),
+      tra050_reference_reason: mode === "notes" ? item.tra050_reference_reason || "" : (reference ? "Referencia TRA050 seleccionada manualmente." : item.tra050_reference_reason || ""),
+      observacion_consumo_referencia: reference ? (notes || item.observacion_consumo_referencia || "Referencia TRA050 seleccionada manualmente por revision del usuario.") : item.observacion_consumo_referencia || ""
+    } : item) }));
   }
 
   function applySimilar(source) {
@@ -443,7 +571,8 @@ export default function App() {
     }
     setProcessing({ stage: "Preparando vehículos elegibles", processed: 0, total: 100, percent: 5 });
     setTimeout(() => {
-      const prepared = prepareVehiclesForPairing(datasets.soldThermal.matchResults || [], datasets.purchasedElectric.matchResults || []);
+      const pairingOptions = { annualMileageKm: pairing.annualMileageKm };
+      const prepared = prepareVehiclesForPairing(datasets.soldThermal.matchResults || [], datasets.purchasedElectric.matchResults || [], pairingOptions);
       if (!prepared.eligibleSold.length) {
         setProcessing(null);
         setToast("No hay vehiculos vendidos elegibles. Revisa el diagnostico: puede faltar fecha de venta, categoria o consumo TRA050/IDAE.");
@@ -473,16 +602,18 @@ export default function App() {
         return;
       }
       setProcessing({ stage: "Generando candidatos por categoría", processed: 25, total: 100, percent: 25 });
-      const candidates = buildPairingCandidates(prepared.eligibleSold, prepared.eligiblePurchased);
+      const candidates = buildPairingCandidates(prepared.eligibleSold, prepared.eligiblePurchased, pairingOptions);
       setProcessing({ stage: "Optimizando emparejamiento", processed: 65, total: 100, percent: 65 });
       const lockedPairs = (pairing.pairs || []).filter((pair) => pair.pair_locked);
       const pairs = autoPairVehicles(candidates, { lockedPairs });
+      const evaluatedCandidates = candidates.evaluatedCandidates || [];
       const usedSold = new Set(pairs.map((pair) => pair.sold_row_id));
       const usedPurchased = new Set(pairs.map((pair) => pair.purchased_row_id));
-      const unpairedSold = prepared.eligibleSold.filter((item) => !usedSold.has(item.id)).map((item) => ({ ...item, pair_status: "unpaired_sold" }));
-      const unpairedPurchased = prepared.eligiblePurchased.filter((item) => !usedPurchased.has(item.id)).map((item) => ({ ...item, pair_status: "unpaired_purchased" }));
+      const unpairedSold = prepared.eligibleSold.filter((item) => !usedSold.has(item.id)).map((item) => ({ ...item, pair_status: "unpaired_sold", ...unpairedReasonFor(item, "sold", evaluatedCandidates, pairs) }));
+      const unpairedPurchased = prepared.eligiblePurchased.filter((item) => !usedPurchased.has(item.id)).map((item) => ({ ...item, pair_status: "unpaired_purchased", ...unpairedReasonFor(item, "purchased", evaluatedCandidates, pairs) }));
       const integrity = validatePairingIntegrity(pairs);
       const nextDatasets = applyPairsToDatasets(datasets, pairs);
+      const pairingDiagnostics = { ...(pairs.diagnostics || candidates.diagnostics || {}), selectedPairs: pairs.length };
       const summary = {
         eligibleSold: prepared.eligibleSold.length,
         eligiblePurchased: prepared.eligiblePurchased.length,
@@ -493,11 +624,12 @@ export default function App() {
         pairs: pairs.length,
         unpairedSold: unpairedSold.length,
         unpairedPurchased: unpairedPurchased.length,
-        totalSavings: pairs.reduce((sum, pair) => sum + (pair.ahorro_kwh_100km || 0), 0),
+        totalSavings: pairs.reduce((sum, pair) => sum + (pair.ahorro_kwh_anio || 0), 0),
+        totalSavings100km: pairs.reduce((sum, pair) => sum + (pair.ahorro_kwh_100km || 0), 0),
         warningPairs: pairs.filter((pair) => pair.warnings?.length).length
       };
       setDatasets(nextDatasets);
-      setPairing({ pairs, candidates, unpairedSold, unpairedPurchased, warnings: prepared.warnings, summary, integrity, updatedAt: new Date().toISOString() });
+      setPairing((current) => ({ ...current, pairs, candidates, evaluatedCandidates, unpairedSold, unpairedPurchased, warnings: prepared.warnings, summary, integrity, pairingDiagnostics, updatedAt: new Date().toISOString() }));
       setProcessing(null);
     }, 0);
   }
@@ -512,7 +644,7 @@ export default function App() {
 
   function undoPair(pairId) {
     const remaining = pairing.pairs.filter((pair) => pair.match_pair_id !== pairId);
-    setPairing((current) => ({ ...current, pairs: remaining, integrity: validatePairingIntegrity(remaining), summary: { ...current.summary, pairs: remaining.length, totalSavings: remaining.reduce((sum, pair) => sum + (pair.ahorro_kwh_100km || 0), 0) } }));
+    setPairing((current) => ({ ...current, pairs: remaining, integrity: validatePairingIntegrity(remaining), summary: { ...current.summary, pairs: remaining.length, totalSavings: remaining.reduce((sum, pair) => sum + (pair.ahorro_kwh_anio || 0), 0), totalSavings100km: remaining.reduce((sum, pair) => sum + (pair.ahorro_kwh_100km || 0), 0) } }));
     setDatasets(applyPairsToDatasets(datasets, remaining));
   }
 
@@ -535,10 +667,11 @@ export default function App() {
             canPair={canPair}
             datasets={datasets}
             pairing={pairing}
+            onAnnualMileageChange={(value) => setPairing((current) => ({ ...current, annualMileageKm: value }))}
             onGenerate={generatePairing}
             onToggleLock={togglePairLock}
             onUndoPair={undoPair}
-            onExportFinal={() => exportFinalTra050Excel({ pairs: pairing.pairs, datasets, warnings: pairing.warnings })}
+            onExportFinal={() => exportFinalTra050Excel({ pairs: pairing.pairs, datasets, warnings: pairing.warnings, unpairedSold: pairing.unpairedSold, unpairedPurchased: pairing.unpairedPurchased })}
           />
         </>
       ) : (
@@ -547,7 +680,7 @@ export default function App() {
         {Object.entries(DATASET_CONFIG).map(([key, config]) => {
           const data = datasets[key]?.matchResults || [];
           return (
-            <article className={`dataset-status-card ${activeDatasetKey === key ? "active" : ""}`} key={key} onClick={() => setActiveDatasetKey(key)}>
+            <article className={`dataset-status-card ${activeDatasetKey === key ? "active" : ""}`} key={key} onClick={() => { setActiveDatasetKey(key); setSelected(null); }}>
               <span>{config.shortLabel}</span>
               <strong>{data.length}</strong>
               <p>Exactos: {data.filter((item) => item.match_estado === MATCH_STATES.exacto).length} · Conflictos: {data.filter((item) => item.match_estado === MATCH_STATES.conflicto).length} · Sin match: {data.filter((item) => item.match_estado === MATCH_STATES.sinMatch).length} · No DB: {data.filter((item) => item.match_estado === MATCH_STATES.noEncontrado).length}</p>
@@ -571,7 +704,7 @@ export default function App() {
       </div>
       <ValidationSummary validation={validation} />
       <MatchSummaryCards items={items} alerts={validation?.alerts || []} />
-      <VehiclesTable items={items} onSelect={setSelected} onMarkMissing={markMissing} />
+      <VehiclesTable items={items} datasetType={activeConfig.type} resetKey={`${activeDatasetKey}:${activeDataset.tableVersion || 0}`} onSelect={setSelected} onMarkMissing={markMissing} />
       <ConflictResolver groups={conflictGroups} index={index} onAssign={assignCandidate} onAssignGroup={assignCandidateToGroup} onApplySimilar={applySimilar} onMarkMissing={markMissing} onMarkGroupMissing={markGroupMissing} onResolveIndividually={resolveIndividually} onSelect={setSelected} />
       <MissingReferencePanel items={items} onUpdate={updateMissingReference} />
       <ManualDbSearch index={index} selectedItem={selectedFresh} onAssign={assignCandidate} />

@@ -1,6 +1,8 @@
 import * as XLSX from "xlsx";
 import { MATCH_MEANINGS } from "./matchEngine.js";
 import { TRA050_CONSUMO_REFERENCIA_ANTIGUO_TERMICO, TRA050_CONSUMO_REFERENCIA_NUEVO_ELECTRICO } from "../data/tra050-reference.js";
+import { factorForFuel } from "../tra050/tra050Factors.js";
+import { getAnnualMileageForTra050, getVehicleConsumptionForTra050 } from "../tra050/tra050Savings.js";
 
 function officialConsumption(item) {
   if (item.assigned?.consumoElectricoKwh100) return { value: item.assigned.consumoElectricoKwh100, unit: "kWh/100km", origin: "idae_db" };
@@ -11,6 +13,11 @@ function officialConsumption(item) {
 export function flattenResult(item) {
   const assigned = item.assigned || {};
   const consumption = officialConsumption(item);
+  const traConsumption = getVehicleConsumptionForTra050(item, item.dataset_type || item.input?.dataset_type || "");
+  const mileage = getAnnualMileageForTra050(item);
+  const fuel = item.input?.combustible_motorizacion || item.input?.Combustible_Motorizacion_Nuevo || item.combustible_referencia_tra050 || item.reference?.combustible || assigned.motorizacion || "";
+  const factor = factorForFuel(fuel, traConsumption.unit);
+  const soldConverted = item.consumo_vendido_kwh_100km || (item.dataset_type === "sold_thermal" && traConsumption.value !== null && factor.factor ? Number((traConsumption.value * factor.factor).toFixed(4)) : "");
   const operationKey = item.dataset_type === "sold_thermal" ? "fecha_venta" : "fecha_compra";
   return {
     dataset_type: item.dataset_type || item.input?.dataset_type || "",
@@ -38,11 +45,16 @@ export function flattenResult(item) {
     vehiculo_no_encontrado_db: Boolean(item.vehiculo_no_encontrado_db),
     consumo_origen: item.consumo_origen || consumption.origin,
     consumo_oficial_extraido: consumption.value,
-    consumo_referencia_tra050: item.reference?.consumo || item.reference?.consumo_kwh_100km || "",
-    unidad_consumo: item.reference?.unidad || consumption.unit || (item.reference?.consumo_kwh_100km ? "kWh/100km" : ""),
+    consumo_referencia_tra050: item.consumo_referencia_tra050 || item.reference?.consumo || item.reference?.consumo_kwh_100km || "",
+    unidad_consumo: item.unidad_consumo || item.reference?.unidad || consumption.unit || (item.reference?.consumo_kwh_100km ? "kWh/100km" : ""),
     unidad_consumo_referencia: item.reference?.unidad || (item.reference?.consumo_kwh_100km ? "kWh/100km" : ""),
-    tipologia_referencia_tra050: item.reference?.tipologia || "",
-    combustible_referencia_tra050: item.reference?.combustible || "",
+    tipologia_referencia_tra050: item.tipologia_referencia_tra050 || item.reference?.tipologia || "",
+    combustible_referencia_tra050: item.combustible_referencia_tra050 || item.reference?.combustible || "",
+    tra050_reference_auto_selected: Boolean(item.tra050_reference_auto_selected),
+    tra050_reference_manual_selected: Boolean(item.tra050_reference_manual_selected),
+    tra050_reference_confidence: item.tra050_reference_confidence || "",
+    tra050_reference_reason: item.tra050_reference_reason || "",
+    observacion_consumo_referencia: item.observacion_consumo_referencia || "",
     match_manual: Boolean(item.match_manual),
     manual_search_used: Boolean(item.manual_search_used),
     learning_rule_applied: Boolean(item.learning_rule_applied),
@@ -57,10 +69,20 @@ export function flattenResult(item) {
     conflict_group_label: item.conflict_group_label || "",
     conflict_group_size: item.conflict_group_size || "",
     resolved_as_group: Boolean(item.resolved_as_group),
-    group_resolution_mode: item.group_resolution_mode || ""
+    group_resolution_mode: item.group_resolution_mode || "",
+    group_resolution_timestamp: item.group_resolution_timestamp || ""
     ,
     match_pair_id: item.input?.match_pair_id || item.match_pair_id || null,
     pair_status: item.input?.pair_status || item.pair_status || "not_paired"
+    ,
+    consumo_vendido_original: item.dataset_type === "sold_thermal" ? traConsumption.value ?? "" : "",
+    unidad_consumo_vendido: item.dataset_type === "sold_thermal" ? traConsumption.unit || "" : "",
+    factor_conversion_f: item.dataset_type === "sold_thermal" ? item.factor_conversion_f || factor.factor || "" : "",
+    consumo_vendido_kwh_100km: soldConverted,
+    kilometraje_anual_km: item.dataset_type === "sold_thermal" ? item.kilometraje_anual_km || mileage.value || "" : "",
+    tipologia_km_anuales: item.dataset_type === "sold_thermal" ? item.tipologia_km_anuales || mileage.typology || "" : "",
+    origen_km_anuales: item.dataset_type === "sold_thermal" ? item.origen_km_anuales || mileage.source || "" : "",
+    consumo_comprado_kwh_100km: item.dataset_type === "purchased_electric" ? item.consumo_comprado_kwh_100km || traConsumption.value || "" : ""
   };
 }
 
@@ -84,6 +106,7 @@ export function exportProjectJson(datasets, learningRules, pairing = null) {
     soldThermal: datasets.soldThermal,
     purchasedElectric: datasets.purchasedElectric,
     pairing,
+    pairingDiagnostics: pairing?.pairingDiagnostics || null,
     learningRules,
     tra050ReferenceTables: {
       TRA050_CONSUMO_REFERENCIA_NUEVO_ELECTRICO,
