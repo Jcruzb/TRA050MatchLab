@@ -7,7 +7,7 @@ import {
 import { normalizeText, tokenSimilarity } from "./normalize.js";
 import { applyLearningRules } from "../engine/vehicleLearning.js";
 import { explainableVectorScore } from "../engine/vehicleScoring.js";
-import { compareTechnicalSpecs, technicalScoreAdjustment } from "./technicalSpecs.js";
+import { buildVehicleTechnicalComparison, compareTechnicalSpecs, technicalScoreAdjustment } from "./technicalSpecs.js";
 
 export const MATCH_STATES = {
   exacto: "Match exacto",
@@ -187,6 +187,7 @@ function compareValue(user, db, tolerance, label, weight, explanation) {
 export function scoreCandidate(user, candidate) {
   const explanation = [];
   const technicalComparison = compareTechnicalSpecs(user, candidate);
+  const technical_comparison = buildVehicleTechnicalComparison(user, candidate);
   const vector = explainableVectorScore(user, candidate);
   let score = 0;
   let excludeFromNormalCandidates = false;
@@ -261,6 +262,7 @@ export function scoreCandidate(user, candidate) {
         .map((comparison) => comparison.explanation)
     ],
     technicalComparison,
+    technical_comparison,
     explicacion: explanation.join(" ")
   };
 }
@@ -315,6 +317,7 @@ export function matchVehicle(row, rowIndex, index, learningRules = []) {
   if (learned) {
     const candidate = index.find((entry) => entry.id_idae === learned.selectedIdIdae);
     if (candidate) {
+      const scoredCandidate = { ...candidate, score: 100, explicacion: "Coincidencia aplicada por aprendizaje local.", technical_comparison: buildVehicleTechnicalComparison(userFeatures, candidate), technicalComparison: compareTechnicalSpecs(userFeatures, candidate) };
       return {
         id: `${row.Matricula_Nuevo || "fila"}-${rowIndex}`,
         rowIndex,
@@ -330,8 +333,8 @@ export function matchVehicle(row, rowIndex, index, learningRules = []) {
           learningRuleApplied: learned.id,
           topCandidates: [{ id_idae: candidate.id_idae, modeloOriginal: candidate.modeloOriginal, score: 100 }]
         },
-        candidates: [{ ...candidate, score: 100, explicacion: "Coincidencia aplicada por aprendizaje local." }],
-        assigned: candidate,
+        candidates: [scoredCandidate],
+        assigned: scoredCandidate,
         match_estado: MATCH_STATES.exacto,
         match_score: 100,
         match_significado: MATCH_MEANINGS[MATCH_STATES.exacto],
@@ -339,6 +342,8 @@ export function matchVehicle(row, rowIndex, index, learningRules = []) {
         conflictos_detectados: "",
         match_manual: false,
         vehiculo_no_encontrado_db: false,
+        technical_comparison: scoredCandidate.technical_comparison,
+        technicalComparison: scoredCandidate.technicalComparison,
         learning_rule_applied: true,
         learning_rule_id: learned.id,
         reference: null,
@@ -385,6 +390,8 @@ export function matchVehicle(row, rowIndex, index, learningRules = []) {
     vehiculo_no_encontrado_db: false,
     matched_features: best?.matchedFeatures?.join(", ") || "",
     penalties: best?.penalties?.join(", ") || "",
+    technical_comparison: best?.technical_comparison || null,
+    technicalComparison: best?.technicalComparison || null,
     learning_rule_applied: false,
     learning_rule_id: "",
     reference: null,

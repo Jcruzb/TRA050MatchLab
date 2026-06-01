@@ -25,6 +25,7 @@ import { applyPairsToDatasets, autoPairVehicles, buildPairingCandidates, prepare
 import { exportFinalTra050Excel } from "./tra050/tra050PairExport.js";
 import { applyTra050ReferenceResolution } from "./tra050/tra050ReferenceResolver.js";
 import { buildProjectSessionJson, loadProjectSession, saveProjectSession } from "./utils/projectSession.js";
+import { buildVehicleTechnicalComparison, compareTechnicalSpecs } from "./utils/technicalSpecs.js";
 
 const STORAGE_KEY = "tra050-matchlab-session";
 const EMPTY_PAIRING = { pairs: [], unpairedSold: [], unpairedPurchased: [], candidates: [], warnings: [], summary: {}, integrity: null, updatedAt: null, annualMileageKm: "" };
@@ -165,7 +166,8 @@ function slimCandidate(candidate) {
     explicacion: candidate.explicacion,
     matchedFeatures: candidate.matchedFeatures,
     penalties: candidate.penalties,
-    technicalComparison: candidate.technicalComparison
+    technicalComparison: candidate.technicalComparison,
+    technical_comparison: candidate.technical_comparison
   };
 }
 
@@ -334,7 +336,7 @@ export default function App() {
     }
   }
 
-  function assignCandidate(itemId, candidateId, manual = false, candidateOverride = null) {
+  function assignCandidate(itemId, candidateId, manual = false, candidateOverride = null, selectionSource = "") {
     const sourceItem = items.find((item) => item.id === itemId);
     const sourceCandidate = candidateOverride || sourceItem?.candidates.find((entry) => entry.id_idae === candidateId) || index.find((entry) => entry.id_idae === candidateId);
     if (manual && sourceItem && sourceCandidate) {
@@ -352,14 +354,21 @@ export default function App() {
       if (item.id !== itemId) return item;
       const candidate = candidateOverride || item.candidates.find((entry) => entry.id_idae === candidateId) || index.find((entry) => entry.id_idae === candidateId);
       if (!candidate) return item;
+      const technical_comparison = buildVehicleTechnicalComparison(item, candidate);
+      const technicalComparison = compareTechnicalSpecs(item.userFeatures || {}, candidate);
       return {
         ...item,
         assigned: candidate,
+        technical_comparison,
+        technicalComparison,
         match_estado: manual ? MATCH_STATES.exacto : item.match_estado,
         match_score: candidate.score || item.match_score || 100,
         match_significado: MATCH_MEANINGS[MATCH_STATES.exacto],
         explicacion_match: manual ? `Asignacion manual a ${candidate.modeloOriginal}.` : item.explicacion_match,
         match_manual: manual,
+        selection_source: selectionSource || (manual ? "manual-selection" : item.selection_source || ""),
+        comparison_matrix_used: selectionSource === "candidate_comparison_matrix" || Boolean(item.comparison_matrix_used),
+        comparison_candidate_ids: selectionSource === "candidate_comparison_matrix" ? (sourceItem?.candidates || []).slice(0, 5).map((candidate) => candidate.id_idae) : item.comparison_candidate_ids,
         manual_search_used: Boolean(candidateOverride),
         vehiculo_no_encontrado_db: false,
         reference: null,
@@ -397,9 +406,13 @@ export default function App() {
       if (!ids.has(item.id)) return item;
       const candidate = item.candidates.find((entry) => entry.id_idae === candidateId) || index.find((entry) => entry.id_idae === candidateId);
       if (!candidate) return item;
+      const technical_comparison = buildVehicleTechnicalComparison(item, candidate);
+      const technicalComparison = compareTechnicalSpecs(item.userFeatures || {}, candidate);
       return {
         ...item,
         assigned: candidate,
+        technical_comparison,
+        technicalComparison,
         match_estado: MATCH_STATES.exacto,
         match_score: candidate.score || item.match_score || 100,
         match_significado: MATCH_MEANINGS[MATCH_STATES.exacto],
@@ -407,6 +420,9 @@ export default function App() {
           ? `Asignado manualmente por el usuario desde busqueda global en DB IDAE: ${candidate.modeloOriginal}.`
           : `Resolucion de grupo aplicada a ${group.groupSize} vehiculos: ${candidate.modeloOriginal}.`,
         match_manual: true,
+        selection_source: mode,
+        comparison_matrix_used: mode === "candidate_comparison_matrix" || Boolean(item.comparison_matrix_used),
+        comparison_candidate_ids: mode === "candidate_comparison_matrix" ? group.candidateOptions.slice(0, 5).map((candidate) => candidate.id_idae) : item.comparison_candidate_ids,
         manual_search_used: mode === "global-search",
         vehiculo_no_encontrado_db: false,
         reference: null,
@@ -564,6 +580,8 @@ export default function App() {
     updateActiveDataset((dataset) => ({ ...dataset, matchResults: dataset.matchResults.map((item) => similar.some((entry) => entry.id === item.id) ? {
       ...item,
       assigned: source.assigned,
+      technical_comparison: buildVehicleTechnicalComparison(item, source.assigned),
+      technicalComparison: compareTechnicalSpecs(item.userFeatures || {}, source.assigned),
       match_estado: MATCH_STATES.exacto,
       match_score: source.match_score,
       match_significado: MATCH_MEANINGS[MATCH_STATES.exacto],

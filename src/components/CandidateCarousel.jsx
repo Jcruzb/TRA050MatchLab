@@ -10,7 +10,7 @@ function compactIndexes(total, current) {
   return [...indexes].filter((item) => item >= 0 && item < total).sort((a, b) => a - b);
 }
 
-export default function CandidateCarousel({ candidates = [], selectedCandidateId, userFeatures, onSelectCandidate }) {
+export default function CandidateCarousel({ candidates = [], selectedCandidateId, userFeatures, userVehicle, onSelectCandidate }) {
   const safeCandidates = Array.isArray(candidates) ? candidates : [];
   const selectedIndex = Math.max(0, safeCandidates.findIndex((candidate) => candidate.id_idae === selectedCandidateId));
   const [currentIndex, setCurrentIndex] = useState(selectedIndex);
@@ -50,7 +50,7 @@ export default function CandidateCarousel({ candidates = [], selectedCandidateId
           ))}
         </div>
       )}
-      <CandidateOptionCard candidate={current} userFeatures={userFeatures} selected hideAction />
+      <CandidateOptionCard candidate={current} userFeatures={userFeatures} userVehicle={userVehicle} selected hideAction />
     </div>
   );
 }

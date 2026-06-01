@@ -1,5 +1,5 @@
 import { normalizeText } from "./normalize.js";
-import { compareTechnicalSpecs, formatCilindradaCc, formatEmisionesGco2Km, formatPotenciaCv, parseEmisionesGco2Km } from "./technicalSpecs.js";
+import { buildVehicleTechnicalComparison, formatCilindradaCc, formatEmisionesGco2Km, formatPotenciaCv, parseEmisionesGco2Km } from "./technicalSpecs.js";
 
 const EMPTY = "-";
 
@@ -36,15 +36,24 @@ export function candidateSearchText(candidate) {
   ].filter(Boolean).join(" "));
 }
 
-export function formatVehicleCandidate(candidate, userFeatures = {}) {
+function unique(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function nonTechnicalPenalty(value) {
+  return !/\b(cilindrada|potencia|emisiones)\b/i.test(String(value || ""));
+}
+
+export function formatVehicleCandidate(candidate, userVehicleOrFeatures = {}) {
+  const userFeatures = userVehicleOrFeatures.userFeatures || userVehicleOrFeatures;
   const raw = candidate.raw || {};
   const detail = raw.detalle_tecnico || {};
   const wltp = raw.tabla_wltp || {};
   const consumo = candidate.consumoElectricoKwh100 || candidate.consumoLitros100 || valueOf(detail, "Consumo electrico") || valueOf(detail, "Consumo mixto");
   const emisionesValue = candidate.emisionesWltpGco2Km || parseEmisionesGco2Km(valueOf(detail, "Emisiones segun ciclo WLTP") !== EMPTY ? valueOf(detail, "Emisiones segun ciclo WLTP") : (wltp.emisiones_minimo || wltp.emisiones_maximo));
-  const technicalComparison = candidate.technicalComparison || compareTechnicalSpecs(userFeatures, candidate);
-  const technicalMatches = Object.values(technicalComparison).filter((item) => item.status === "compatible").map((item) => item.explanation);
-  const technicalDifferences = Object.values(technicalComparison).filter((item) => ["dudosa", "distinta"].includes(item.status)).map((item) => item.explanation);
+  const structuredComparison = buildVehicleTechnicalComparison(userVehicleOrFeatures, candidate);
+  const technicalMatches = Object.values(structuredComparison).filter((item) => ["match", "compatible"].includes(item.status)).map((item) => item.explanation);
+  const technicalDifferences = Object.values(structuredComparison).filter((item) => ["doubtful", "different"].includes(item.status)).map((item) => item.explanation);
   const formatted = {
     idIdae: clean(candidate.id_idae || raw.id_idae),
     title: clean(candidate.modeloOriginal || raw.modelo_tabla || valueOf(detail, "Nombre")),
@@ -106,16 +115,16 @@ export function formatVehicleCandidate(candidate, userFeatures = {}) {
   if (userFeatures.year && candidate.yearMY && Math.abs(userFeatures.year - candidate.yearMY) <= 1) badges.push(badge("Año compatible", "ok"));
   if (candidate.motorizacion) badges.push(badge(candidate.motorizacion, "info"));
   if (candidate.tipoCambio) badges.push(badge(candidate.tipoCambio, "info"));
-  Object.entries(technicalComparison).forEach(([key, comparison]) => {
-    if (comparison.status === "dudosa") badges.push(badge(`${key} dudosa`, "warning"));
-    if (comparison.status === "distinta") badges.push(badge(`${key} distinta`, "danger"));
+  Object.entries(structuredComparison).forEach(([key, comparison]) => {
+    if (comparison.status === "doubtful") badges.push(badge(`${key} dudoso`, "warning"));
+    if (comparison.status === "different") badges.push(badge(`${key} diferente`, "danger"));
   });
   if (candidate.potenciaElectricaKw) badges.push(badge("Electrico", "info"));
   formatted.badges = badges.slice(0, 8);
 
   formatted.comparison = {
-    matches: [...(candidate.matchedFeatures || []), ...technicalMatches],
-    differences: [...(candidate.penalties || []), ...technicalDifferences],
+    matches: unique([...(candidate.matchedFeatures || []), ...technicalMatches]),
+    differences: unique([...(candidate.penalties || []).filter(nonTechnicalPenalty), ...technicalDifferences]),
     explanation: clean(candidate.explicacion)
   };
   return formatted;

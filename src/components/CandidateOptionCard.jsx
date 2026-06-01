@@ -1,16 +1,17 @@
 import { useState } from "react";
 import { formatVehicleCandidate } from "../utils/formatVehicleCandidate.js";
+import CandidateComparisonTable from "./CandidateComparisonTable.jsx";
 
-export default function CandidateOptionCard({ candidate, userFeatures, selected, onSelect, actionLabel = "Seleccionar", hideAction = false }) {
+export default function CandidateOptionCard({ candidate, userFeatures, userVehicle, selected, onSelect, actionLabel = "Seleccionar", hideAction = false }) {
   const [open, setOpen] = useState(false);
-  const data = formatVehicleCandidate(candidate, userFeatures);
+  const data = formatVehicleCandidate(candidate, userVehicle || userFeatures);
   return (
     <article className={`candidate-card ${selected ? "selected" : ""}`}>
       <div className="candidate-card-header">
         <div>
           <strong>{data.score} pts · IDAE {data.idIdae}</strong>
           <h3>{data.title}</h3>
-          {data.subtitle !== "—" && <p className="muted">{data.subtitle}</p>}
+          {!["-", "—"].includes(data.subtitle) && <p className="muted">{data.subtitle}</p>}
         </div>
         <span className="badge info">{data.brand}</span>
       </div>
@@ -39,6 +40,7 @@ export default function CandidateOptionCard({ candidate, userFeatures, selected,
 
       {open && (
         <div className="candidate-full-detail">
+          <CandidateComparisonTable userVehicle={userVehicle || userFeatures} candidate={candidate} />
           {[
             ["Resumen", data.technicalRows.slice(0, 6)],
             ["Datos técnicos", data.technicalRows.slice(6, 22)],

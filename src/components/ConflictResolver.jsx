@@ -4,6 +4,7 @@ import { MATCH_MEANINGS } from "../utils/matchEngine.js";
 import { normalizeText } from "../utils/normalize.js";
 import CandidateSelector from "./CandidateSelector.jsx";
 import CandidateCarousel from "./CandidateCarousel.jsx";
+import CandidateComparisonMatrix from "./CandidateComparisonMatrix.jsx";
 
 function GlobalDbSearchModal({ group, index, onClose, onAssignGroup, onAssign }) {
   const [filters, setFilters] = useState({ text: "", brand: "", model: "", motorizacion: "", cilindrada: "", year: "", cambio: "" });
@@ -88,6 +89,7 @@ export default function ConflictResolver({
   const [expanded, setExpanded] = useState({});
   const [manualGroup, setManualGroup] = useState(null);
   const [selectorGroup, setSelectorGroup] = useState(null);
+  const [comparisonTarget, setComparisonTarget] = useState(null);
   const targets = groups || [];
   const selection = useMemo(() => Object.fromEntries(targets.map((group) => [
     group.groupKey,
@@ -135,6 +137,7 @@ export default function ConflictResolver({
                 candidates={group.candidateOptions}
                 selectedCandidateId={selection[group.groupKey]}
                 userFeatures={group.vehicles[0].matchResult.userFeatures}
+                userVehicle={group.vehicles[0].matchResult}
                 onSelectCandidate={(candidate) => setSelectedByGroup((current) => ({ ...current, [group.groupKey]: candidate.id_idae }))}
               />
             </div>
@@ -143,6 +146,7 @@ export default function ConflictResolver({
               <button className="small" onClick={() => onAssignGroup(group, group.suggestedCandidate?.id_idae || selection[group.groupKey], "suggested")}><Check size={16} /> Usar sugerido para todo el grupo</button>
               <button className="small ghost" onClick={() => onAssignGroup(group, selection[group.groupKey], "manual-selection")}><Check size={16} /> Aplicar candidato seleccionado a todo el grupo</button>
               <button className="small ghost" onClick={() => setManualGroup(group)}><Search size={16} /> Buscar manualmente en toda la DB</button>
+              <button className="small ghost" onClick={() => setComparisonTarget({ context: "group", group, item: group.vehicles[0].matchResult })}>Comparar candidatos</button>
               <button className="small ghost" onClick={() => onMarkGroupMissing(group)}>Marcar grupo como no encontrado en DB</button>
               <button className="small ghost" onClick={() => setExpanded((current) => ({ ...current, [group.groupKey]: !current[group.groupKey] }))}>Resolver individualmente</button>
             </div>
@@ -161,6 +165,7 @@ export default function ConflictResolver({
                     <div className="button-row">
                       <button className="icon" onClick={() => onSelect(vehicle.matchResult)} title="Ver detalle"><Eye size={16} /></button>
                       <button className="small ghost" onClick={() => onAssign(vehicle.rowId, selection[group.groupKey], true)}>Aplicar solo a esta fila</button>
+                      <button className="small ghost" onClick={() => setComparisonTarget({ context: "individual", group, item: vehicle.matchResult })}>Comparar candidatos</button>
                       <button className="small ghost" onClick={() => onMarkMissing(vehicle.rowId)}>Marcar solo este vehiculo como no encontrado en DB</button>
                       <button className="small ghost" onClick={() => onResolveIndividually(vehicle.rowId)}>Separar del grupo</button>
                     </div>
@@ -184,6 +189,23 @@ export default function ConflictResolver({
         />
       )}
       {manualGroup && <GlobalDbSearchModal group={manualGroup} index={index} onClose={() => setManualGroup(null)} onAssignGroup={onAssignGroup} onAssign={onAssign} />}
+      {comparisonTarget && (
+        <CandidateComparisonMatrix
+          userVehicle={comparisonTarget.item}
+          candidates={comparisonTarget.item?.candidates?.length ? comparisonTarget.item.candidates : comparisonTarget.group.candidateOptions}
+          activeCandidateId={selection[comparisonTarget.group.groupKey]}
+          context={comparisonTarget.context}
+          onClose={() => setComparisonTarget(null)}
+          onSelectCandidate={(candidate) => {
+            if (comparisonTarget.context === "group") {
+              onAssignGroup(comparisonTarget.group, candidate.id_idae, "candidate_comparison_matrix");
+            } else {
+              onAssign(comparisonTarget.item.id, candidate.id_idae, true, candidate, "candidate_comparison_matrix");
+            }
+            setComparisonTarget(null);
+          }}
+        />
+      )}
     </section>
   );
 }

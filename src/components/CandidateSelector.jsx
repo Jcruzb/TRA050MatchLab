@@ -46,7 +46,7 @@ export default function CandidateSelector({
           </select>
         </div>
 
-        <CandidateCarousel candidates={candidates.slice(0, limit)} selectedCandidateId={selectedCandidateId} userFeatures={userFeatures} onSelectCandidate={onSelectCandidate} />
+        <CandidateCarousel candidates={candidates.slice(0, limit)} selectedCandidateId={selectedCandidateId} userFeatures={userFeatures} userVehicle={group.vehicles[0].matchResult} onSelectCandidate={onSelectCandidate} />
 
         <div className="button-row selector-actions">
           {limit < candidates.length && <button className="ghost" onClick={() => setLimit((value) => value + 5)}>Ver más candidatos</button>}

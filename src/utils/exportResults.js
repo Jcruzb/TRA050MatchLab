@@ -3,7 +3,7 @@ import { MATCH_MEANINGS } from "./matchEngine.js";
 import { TRA050_CONSUMO_REFERENCIA_ANTIGUO_TERMICO, TRA050_CONSUMO_REFERENCIA_NUEVO_ELECTRICO } from "../data/tra050-reference.js";
 import { factorForFuel } from "../tra050/tra050Factors.js";
 import { getAnnualMileageForTra050, getVehicleConsumptionForTra050 } from "../tra050/tra050Savings.js";
-import { compareTechnicalSpecs, parseCilindradaCc, parseEmisionesGco2Km, parsePotenciaCv } from "./technicalSpecs.js";
+import { buildVehicleTechnicalComparison, compareTechnicalSpecs, parseCilindradaCc, parseEmisionesGco2Km, parsePotenciaCv } from "./technicalSpecs.js";
 
 function officialConsumption(item) {
   if (item.assigned?.consumoElectricoKwh100) return { value: item.assigned.consumoElectricoKwh100, unit: "kWh/100km", origin: "idae_db" };
@@ -31,6 +31,7 @@ export function flattenResult(item) {
     emisionesWltpGco2Km: assigned.emisionesWltpGco2Km
   };
   const technicalComparison = item.technicalComparison || compareTechnicalSpecs(loadedSpecs, idaeSpecs);
+  const structuredComparison = item.technical_comparison || assigned.technical_comparison || buildVehicleTechnicalComparison(item, assigned);
   const noDbBasis = item.no_db_technical_basis || item.no_db_justification?.technical_basis || {};
   return {
     dataset_type: item.dataset_type || item.input?.dataset_type || "",
@@ -56,8 +57,21 @@ export function flattenResult(item) {
     potencia_idae_cv: idaeSpecs.potenciaCv ?? "",
     emisiones_idae_gco2_km: idaeSpecs.emisionesWltpGco2Km ?? "",
     cilindrada_match_status: technicalComparison.cilindrada?.status || "",
+    cilindrada_comparacion_estado: structuredComparison.cilindrada?.status_label || structuredComparison.cilindrada?.status || "",
+    cilindrada_diferencia_cc: structuredComparison.cilindrada?.difference ?? "",
     potencia_match_status: technicalComparison.potencia?.status || "",
+    potencia_comparacion_estado: structuredComparison.potencia?.status_label || structuredComparison.potencia?.status || "",
+    potencia_diferencia_cv: structuredComparison.potencia?.difference ?? "",
     emisiones_match_status: technicalComparison.emisiones?.status || "",
+    emisiones_cargadas_gco2_km: loadedSpecs.emisionesWltpGco2Km ?? "",
+    emisiones_comparacion_estado: structuredComparison.emisiones?.status_label || structuredComparison.emisiones?.status || "",
+    emisiones_diferencia_gco2_km: structuredComparison.emisiones?.difference ?? "",
+    combustible_cargado: structuredComparison.motorizacion?.user_value || "",
+    combustible_idae: structuredComparison.motorizacion?.idae_value || "",
+    combustible_comparacion_estado: structuredComparison.motorizacion?.status_label || structuredComparison.motorizacion?.status || "",
+    cambio_cargado: structuredComparison.cambio?.user_value || "",
+    cambio_idae: structuredComparison.cambio?.idae_value || "",
+    cambio_comparacion_estado: structuredComparison.cambio?.status_label || structuredComparison.cambio?.status || "",
     match_estado: item.match_estado,
     match_score: item.match_score,
     match_significado: MATCH_MEANINGS[item.match_estado] || item.match_significado,
@@ -84,6 +98,9 @@ export function flattenResult(item) {
     observacion_consumo_referencia: item.observacion_consumo_referencia || "",
     match_manual: Boolean(item.match_manual),
     manual_search_used: Boolean(item.manual_search_used),
+    selection_source: item.selection_source || "",
+    comparison_matrix_used: Boolean(item.comparison_matrix_used),
+    comparison_candidate_ids: (item.comparison_candidate_ids || []).join(", "),
     learning_rule_applied: Boolean(item.learning_rule_applied),
     learning_rule_id: item.learning_rule_id || "",
     fecha_validacion: new Date().toISOString(),
