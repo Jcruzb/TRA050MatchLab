@@ -1,4 +1,5 @@
 import { dateToYear, normalizeText, parseNumber, tokenize } from "./normalize.js";
+import { parseCilindradaCc, parseEmisionesGco2Km, parsePotenciaCv } from "./technicalSpecs.js";
 
 export const BRAND_ALIASES = {
   peugeot: ["peugeot", "peuge", "peug", "pgt"],
@@ -165,12 +166,7 @@ export function extractModelBaseFromText(text = "", brand = "", modelBrandIndex 
 }
 
 export function extractCilindrada(value = "") {
-  const text = normalizeText(value);
-  const cc = text.match(/\b([1-9]\d{2,4})\s*(cc|cm3)?\b/);
-  if (cc && Number(cc[1]) < 9000) return Number(cc[1]);
-  const litros = text.match(/\b([0-9],[0-9]|[0-9]\.[0-9])\b/);
-  if (litros) return Math.round(Number(litros[1].replace(",", ".")) * 1000);
-  return null;
+  return parseCilindradaCc(value);
 }
 
 export function extractYearMY(...values) {
@@ -183,12 +179,7 @@ export function extractYearMY(...values) {
 }
 
 export function extractPowerCv(value = "") {
-  const text = normalizeText(value);
-  const cv = text.match(/(\d{2,4}([,.]\d+)?)\s*cv/);
-  if (cv) return Number(cv[1].replace(",", "."));
-  const kw = text.match(/(\d{2,4}([,.]\d+)?)\s*kw/);
-  if (kw) return Math.round(Number(kw[1].replace(",", ".")) * 1.35962);
-  return parseNumber(value);
+  return parsePotenciaCv(value);
 }
 
 export function extractMotorizacion(...values) {
@@ -275,6 +266,7 @@ export function featuresFromUser(row, brandIndex, modelBrandIndex) {
     cilindradaCc: extractCilindrada(`${row.Cilindrada_Nuevo || ""} ${rawText}`),
     motorizacion: extractMotorizacion(row.Combustible_Motorizacion_Nuevo, rawText),
     potenciaCv: extractPowerCv(row.Potencia_Nuevo),
+    emisionesWltpGco2Km: parseEmisionesGco2Km(row.Emisiones_WLTP_gCO2_km || row.emisiones_wltp_gco2_km),
     cambio: extractCambio(row.Tipo_Cambio_Nuevo, rawText),
     tipoCambio: extractCambio(row.Tipo_Cambio_Nuevo, rawText),
     carroceria: extractCarroceria(row.Carroceria_Nuevo, rawText),
@@ -315,6 +307,7 @@ export function normalizeIdaeVehicle(vehicle, brandIndex) {
     motorizacion: extractMotorizacion(detailValue(detail, "Motorización"), model),
     tipoCambio: extractCambio(detailValue(detail, "Tipo de cambio"), model),
     potenciaCv: extractPowerCv(detailValue(detail, "Potencia")),
+    emisionesWltpGco2Km: parseEmisionesGco2Km(detailValue(detail, "Emisiones según ciclo WLTP") || vehicle.tabla_wltp?.emisiones_minimo || vehicle.tabla_wltp?.emisiones_maximo),
     potenciaTermicaKw: parseNumber(detailValue(detail, "Potencia térmica")),
     potenciaElectricaKw: parseNumber(detailValue(detail, "Potencia eléctrica")),
     segmento: detailValue(detail, "Segmento comercial"),

@@ -7,6 +7,7 @@ import {
 import { normalizeText, tokenSimilarity } from "./normalize.js";
 import { applyLearningRules } from "../engine/vehicleLearning.js";
 import { explainableVectorScore } from "../engine/vehicleScoring.js";
+import { compareTechnicalSpecs, technicalScoreAdjustment } from "./technicalSpecs.js";
 
 export const MATCH_STATES = {
   exacto: "Match exacto",
@@ -185,6 +186,7 @@ function compareValue(user, db, tolerance, label, weight, explanation) {
 
 export function scoreCandidate(user, candidate) {
   const explanation = [];
+  const technicalComparison = compareTechnicalSpecs(user, candidate);
   const vector = explainableVectorScore(user, candidate);
   let score = 0;
   let excludeFromNormalCandidates = false;
@@ -216,7 +218,12 @@ export function scoreCandidate(user, candidate) {
     explanation.push(`Motorizacion compatible (${candidate.motorizacion}).`);
   }
   score += compareValue(user.year, candidate.yearMY, 1, "Ano/MY", 10, explanation);
-  score += compareValue(user.cilindradaCc, candidate.cilindradaCc, 80, "Cilindrada", 7, explanation);
+  score += technicalScoreAdjustment(technicalComparison.cilindrada, 7);
+  score += technicalScoreAdjustment(technicalComparison.potencia, 5);
+  score += technicalScoreAdjustment(technicalComparison.emisiones, 4);
+  Object.values(technicalComparison).forEach((comparison) => {
+    if (comparison.explanation) explanation.push(comparison.explanation);
+  });
   if (!user.tipoCambio || !candidate.tipoCambio) score += 1;
   else if (user.tipoCambio === candidate.tipoCambio) {
     score += 5;
@@ -247,7 +254,13 @@ export function scoreCandidate(user, candidate) {
     score: Math.max(0, Math.min(100, Math.round(score))),
     excludeFromNormalCandidates,
     matchedFeatures: vector.matchedFeatures,
-    penalties: vector.rejectedFeatures,
+    penalties: [
+      ...vector.rejectedFeatures,
+      ...Object.values(technicalComparison)
+        .filter((comparison) => ["dudosa", "distinta"].includes(comparison.status))
+        .map((comparison) => comparison.explanation)
+    ],
+    technicalComparison,
     explicacion: explanation.join(" ")
   };
 }
@@ -279,6 +292,7 @@ export function buildInputSignature(row) {
     row.Cilindrada_Nuevo,
     row.Combustible_Motorizacion_Nuevo,
     row.Potencia_Nuevo,
+    row.Emisiones_WLTP_gCO2_km,
     row.Tipo_Cambio_Nuevo,
     row.Carroceria_Nuevo,
     row.Anio_Modelo_MY_Nuevo,

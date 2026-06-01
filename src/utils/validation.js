@@ -1,19 +1,21 @@
 import { normalizeHeader, parseLooseDate, parseNumber } from "./normalize.js";
+import { parseEmisionesGco2Km } from "./technicalSpecs.js";
 
 export const REQUIRED_FIELDS = [
   "Categoria_nuevo",
   "Matricula_Nuevo",
   "Marca_modelo_Nuevo",
   "Matriculacion_Nuevo",
-  "Fecha Compra",
-  "Nº Contrato/Factura",
-  "Precio (SIN IVA)"
+  "Fecha Compra"
 ];
 
 export const RECOMMENDED_FIELDS = [
+  "Nº Contrato/Factura",
+  "Precio (SIN IVA)",
   "Cilindrada_Nuevo",
   "Combustible_Motorizacion_Nuevo",
   "Potencia_Nuevo",
+  "Emisiones_WLTP_gCO2_km",
   "Tipo_Cambio_Nuevo",
   "Carroceria_Nuevo",
   "Version_Acabado_Nuevo",
@@ -53,6 +55,7 @@ export function validateRows(rows) {
     if (row["Fecha Compra"] && !parseLooseDate(row["Fecha Compra"])) alerts.push({ type: "Advertencia", message: `La fila ${excelRow} tiene fecha de compra invalida.` });
     if (row.Matriculacion_Nuevo && !parseLooseDate(row.Matriculacion_Nuevo)) alerts.push({ type: "Advertencia", message: `La fila ${excelRow} tiene fecha de matriculacion invalida.` });
     if (row["Precio (SIN IVA)"] && parseNumber(row["Precio (SIN IVA)"]) === null) alerts.push({ type: "Advertencia", message: `La fila ${excelRow} tiene un precio que no parece numerico.` });
+    if (row.Emisiones_WLTP_gCO2_km && parseEmisionesGco2Km(row.Emisiones_WLTP_gCO2_km) === null) alerts.push({ type: "Advertencia", message: `La fila ${excelRow} tiene emisiones WLTP no numericas. Unidad esperada: g CO2/km.` });
     const plate = String(row.Matricula_Nuevo || "").toUpperCase().replace(/\s+/g, "");
     if (plate) seen.set(plate, [...(seen.get(plate) || []), excelRow]);
   });

@@ -3,6 +3,7 @@ import { MATCH_MEANINGS } from "./matchEngine.js";
 import { TRA050_CONSUMO_REFERENCIA_ANTIGUO_TERMICO, TRA050_CONSUMO_REFERENCIA_NUEVO_ELECTRICO } from "../data/tra050-reference.js";
 import { factorForFuel } from "../tra050/tra050Factors.js";
 import { getAnnualMileageForTra050, getVehicleConsumptionForTra050 } from "../tra050/tra050Savings.js";
+import { compareTechnicalSpecs, parseCilindradaCc, parseEmisionesGco2Km, parsePotenciaCv } from "./technicalSpecs.js";
 
 function officialConsumption(item) {
   if (item.assigned?.consumoElectricoKwh100) return { value: item.assigned.consumoElectricoKwh100, unit: "kWh/100km", origin: "idae_db" };
@@ -19,6 +20,18 @@ export function flattenResult(item) {
   const factor = factorForFuel(fuel, traConsumption.unit);
   const soldConverted = item.consumo_vendido_kwh_100km || (item.dataset_type === "sold_thermal" && traConsumption.value !== null && factor.factor ? Number((traConsumption.value * factor.factor).toFixed(4)) : "");
   const operationKey = item.dataset_type === "sold_thermal" ? "fecha_venta" : "fecha_compra";
+  const loadedSpecs = {
+    cilindradaCc: parseCilindradaCc(item.input?.cilindrada_cc || item.input?.Cilindrada_Nuevo || item.input?.cilindrada),
+    potenciaCv: parsePotenciaCv(item.input?.potencia_cv || item.input?.Potencia_Nuevo || item.input?.potencia),
+    emisionesWltpGco2Km: parseEmisionesGco2Km(item.input?.emisiones_wltp_gco2_km_num || item.input?.Emisiones_WLTP_gCO2_km || item.input?.emisiones_wltp_gco2_km)
+  };
+  const idaeSpecs = {
+    cilindradaCc: assigned.cilindradaCc,
+    potenciaCv: assigned.potenciaCv,
+    emisionesWltpGco2Km: assigned.emisionesWltpGco2Km
+  };
+  const technicalComparison = item.technicalComparison || compareTechnicalSpecs(loadedSpecs, idaeSpecs);
+  const noDbBasis = item.no_db_technical_basis || item.no_db_justification?.technical_basis || {};
   return {
     dataset_type: item.dataset_type || item.input?.dataset_type || "",
     categoria: item.input?.categoria || item.input?.Categoria_nuevo || "",
@@ -36,6 +49,15 @@ export function flattenResult(item) {
     version_acabado: item.input?.version_acabado || item.input?.Version_Acabado_Nuevo || "",
     anio_modelo_my: item.input?.anio_modelo_my || item.input?.Anio_Modelo_MY_Nuevo || "",
     observaciones: item.input?.observaciones || item.input?.Observaciones_Nuevo || "",
+    cilindrada_cargada_cc: loadedSpecs.cilindradaCc ?? "",
+    potencia_cargada_cv: loadedSpecs.potenciaCv ?? "",
+    emisiones_wltp_cargadas_gco2_km: loadedSpecs.emisionesWltpGco2Km ?? "",
+    cilindrada_idae_cc: idaeSpecs.cilindradaCc ?? "",
+    potencia_idae_cv: idaeSpecs.potenciaCv ?? "",
+    emisiones_idae_gco2_km: idaeSpecs.emisionesWltpGco2Km ?? "",
+    cilindrada_match_status: technicalComparison.cilindrada?.status || "",
+    potencia_match_status: technicalComparison.potencia?.status || "",
+    emisiones_match_status: technicalComparison.emisiones?.status || "",
     match_estado: item.match_estado,
     match_score: item.match_score,
     match_significado: MATCH_MEANINGS[item.match_estado] || item.match_significado,
@@ -43,6 +65,11 @@ export function flattenResult(item) {
     modelo_idae_asignado: assigned.modeloOriginal || "",
     source_url_idae: assigned.source_url || "",
     vehiculo_no_encontrado_db: Boolean(item.vehiculo_no_encontrado_db),
+    no_db_reason_text: item.no_db_reason_text || item.no_db_justification?.reason_text || "",
+    no_db_cilindrada_real_cc: noDbBasis.cilindrada_cc ?? "",
+    no_db_potencia_real_cv: noDbBasis.potencia_cv ?? "",
+    no_db_emisiones_wltp_real_gco2_km: noDbBasis.emisiones_wltp_gco2_km ?? "",
+    no_db_detalles_justificacion: item.no_db_justification ? JSON.stringify(item.no_db_justification) : "",
     consumo_origen: item.consumo_origen || consumption.origin,
     consumo_oficial_extraido: consumption.value,
     consumo_referencia_tra050: item.consumo_referencia_tra050 || item.reference?.consumo || item.reference?.consumo_kwh_100km || "",

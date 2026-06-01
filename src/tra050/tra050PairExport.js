@@ -3,7 +3,20 @@ import { flattenResult } from "../utils/exportResults.js";
 
 export function exportFinalTra050Excel({ pairs, datasets, warnings, unpairedSold = [], unpairedPurchased = [] }) {
   const wb = XLSX.utils.book_new();
+  const soldById = new Map((datasets.soldThermal.matchResults || []).map((item) => [item.id, item]));
+  const purchasedById = new Map((datasets.purchasedElectric.matchResults || []).map((item) => [item.id, item]));
+  const noDbFields = (item, prefix) => {
+    const basis = item?.no_db_technical_basis || item?.no_db_justification?.technical_basis || {};
+    return {
+      [`${prefix}_no_db_reason`]: item?.no_db_reason_text || item?.no_db_justification?.reason_text || "",
+      [`${prefix}_no_db_cilindrada_real_cc`]: basis.cilindrada_cc ?? "",
+      [`${prefix}_no_db_potencia_real_cv`]: basis.potencia_cv ?? "",
+      [`${prefix}_no_db_emisiones_wltp_real_gco2_km`]: basis.emisiones_wltp_gco2_km ?? ""
+    };
+  };
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(pairs.map((pair) => ({
+    ...noDbFields(soldById.get(pair.sold_row_id), "vehiculo_vendido"),
+    ...noDbFields(purchasedById.get(pair.purchased_row_id), "vehiculo_comprado"),
     match_pair_id: pair.match_pair_id,
     categoria: pair.categoria,
     categoria_check_result: pair.categoryCheck?.valid ? "cumple" : "no_cumple",

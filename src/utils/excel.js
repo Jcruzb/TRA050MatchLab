@@ -21,6 +21,7 @@ export function downloadPurchasedTemplate() {
     "1798",
     "hibrido gasolina",
     "140 cv",
+    "118",
     "automatico",
     "touring sport",
     "Style",
@@ -35,7 +36,9 @@ export function downloadPurchasedTemplate() {
       ["Campo", "Tipo", "Indicacion"],
       ...REQUIRED_FIELDS.map((field) => [field, "Obligatorio", "Debe estar informado para validar la carga."]),
       ...RECOMMENDED_FIELDS.map((field) => [field, "Recomendado", "Mejora el matching contra IDAE."]),
-      ["Fecha Compra", "Obligatorio", "Fecha de compra del vehículo eléctrico nuevo."],
+      ["Nº Contrato/Factura", "Recomendado", "No bloquea validacion ni matching."],
+      ["Precio (SIN IVA)", "Recomendado", "No bloquea validacion ni matching."],
+      ["Emisiones_WLTP_gCO2_km", "Recomendado", "Numero en g CO2/km. Ejemplo: 118."],
       ["Fechas", "Formato", "dd/mm/aaaa o fecha Excel."],
       ["Matricula", "Formato", "Sin espacios o con espacios; se normaliza para duplicados."]
     ]),
@@ -51,11 +54,12 @@ export function downloadSoldTemplate() {
     "Marca_modelo_Vendido*",
     "Matriculacion_Vendido*",
     "Fecha Venta*",
-    "Nº Contrato/Factura*",
-    "Precio (SIN IVA)*",
+    "Nº Contrato/Factura",
+    "Precio (SIN IVA)",
     "Cilindrada_Vendido",
     "Combustible_Motorizacion_Vendido",
     "Potencia_Vendido",
+    "Emisiones_WLTP_gCO2_km",
     "Tipo_Cambio_Vendido",
     "Carroceria_Vendido",
     "Version_Acabado_Vendido",
@@ -74,12 +78,13 @@ export function downloadSoldTemplate() {
     "1968",
     "diesel",
     "150 cv",
+    "118",
     "automatico",
     "turismo",
     "Advance",
     "MY20",
     "20000",
-    "Ejemplo vendido térmico"
+    "Ejemplo vendido termico"
   ];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([headers, example]), "Vehiculos_vendidos");
@@ -88,8 +93,10 @@ export function downloadSoldTemplate() {
     XLSX.utils.aoa_to_sheet([
       ["Campo", "Tipo", "Indicacion"],
       ["Campos con *", "Obligatorio", "Debe estar informado para validar la carga."],
-      ["Fecha Venta", "Obligatorio", "Fecha de venta del vehículo térmico sustituido."],
-      ["Formato heredado", "Aceptado", "También se aceptan columnas *_Nuevo y Fecha Compra, interpretada como Fecha de venta en esta pestaña."],
+      ["Nº Contrato/Factura", "Recomendado", "No bloquea validacion ni matching."],
+      ["Precio (SIN IVA)", "Recomendado", "No bloquea validacion ni matching."],
+      ["Emisiones_WLTP_gCO2_km", "Recomendado", "Numero en g CO2/km. Ejemplo: 118."],
+      ["Formato heredado", "Aceptado", "Tambien se aceptan columnas *_Nuevo y Fecha Compra, interpretada como Fecha de venta en esta pestaña."],
       ["Fechas", "Formato", "dd/mm/aaaa o fecha Excel."],
       ["Matricula", "Formato", "Sin espacios o con espacios; se normaliza para duplicados."]
     ]),

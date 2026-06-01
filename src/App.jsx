@@ -13,6 +13,7 @@ import VehicleDetailModal from "./components/VehicleDetailModal.jsx";
 import ExportPanel from "./components/ExportPanel.jsx";
 import ProcessingOverlay from "./components/ProcessingOverlay.jsx";
 import PairingWorkspace from "./components/PairingWorkspace.jsx";
+import NoDbJustificationModal from "./components/NoDbJustificationModal.jsx";
 import { VEHICLE_DB } from "./data/vehicle-db.js";
 import { TRA050_CONSUMO_REFERENCIA_NUEVO_ELECTRICO } from "./data/tra050-reference.js";
 import { buildSearchIndex, matchRowsInChunks, MATCH_MEANINGS, MATCH_STATES } from "./utils/matchEngine.js";
@@ -155,6 +156,7 @@ function slimCandidate(candidate) {
     tipoCambio: candidate.tipoCambio,
     potenciaCv: candidate.potenciaCv,
     potenciaElectricaKw: candidate.potenciaElectricaKw,
+    emisionesWltpGco2Km: candidate.emisionesWltpGco2Km,
     segmento: candidate.segmento,
     consumoElectricoKwh100: candidate.consumoElectricoKwh100,
     consumoLitros100: candidate.consumoLitros100,
@@ -162,7 +164,8 @@ function slimCandidate(candidate) {
     score: candidate.score,
     explicacion: candidate.explicacion,
     matchedFeatures: candidate.matchedFeatures,
-    penalties: candidate.penalties
+    penalties: candidate.penalties,
+    technicalComparison: candidate.technicalComparison
   };
 }
 
@@ -222,6 +225,7 @@ export default function App() {
   const [toast, setToast] = useState("");
   const [processing, setProcessing] = useState(null);
   const [learningRules, setLearningRules] = useState(() => loadLearningRules());
+  const [pendingNoDb, setPendingNoDb] = useState(null);
   const cancelRef = useRef({ cancelled: false });
 
   useEffect(() => {
@@ -428,7 +432,12 @@ export default function App() {
     }) }));
   }
 
-  function markMissing(itemId) {
+  function openNoDbJustification(itemId) {
+    const item = items.find((entry) => entry.id === itemId);
+    if (item) setPendingNoDb({ scope: "individual", items: [item] });
+  }
+
+  function markMissing(itemId, justification) {
     updateActiveDataset((dataset) => ({ ...dataset, matchResults: dataset.matchResults.map((item) => {
       if (item.id !== itemId) return item;
       const missingItem = {
@@ -442,6 +451,10 @@ export default function App() {
       match_significado: MATCH_MEANINGS[MATCH_STATES.noEncontrado],
       explicacion_match: MATCH_MEANINGS[MATCH_STATES.noEncontrado],
       vehiculo_no_encontrado_db: true,
+      no_db_justification: justification,
+      no_db_reason_text: justification?.reason_text || "",
+      no_db_technical_basis: justification?.technical_basis || null,
+      compared_candidates: justification?.compared_candidates || [],
       match_manual: true,
       manual_search_used: false,
       reference: defaultReferenceForDataset(activeConfig),
@@ -454,7 +467,13 @@ export default function App() {
     }) }));
   }
 
-  function markGroupMissing(group) {
+  function openGroupNoDbJustification(group) {
+    const ids = new Set(group.vehicles.map((vehicle) => vehicle.rowId));
+    const groupItems = items.filter((item) => ids.has(item.id));
+    setPendingNoDb({ scope: "group", group, items: groupItems });
+  }
+
+  function markGroupMissing(group, justification) {
     const timestamp = new Date().toISOString();
     const ids = new Set(group.vehicles.map((vehicle) => vehicle.rowId));
     updateActiveDataset((dataset) => ({ ...dataset, matchResults: dataset.matchResults.map((item) => {
@@ -470,6 +489,10 @@ export default function App() {
       match_significado: MATCH_MEANINGS[MATCH_STATES.noEncontrado],
       explicacion_match: `Vehiculo no encontrado en DB aplicado al grupo ${group.label}.`,
       vehiculo_no_encontrado_db: true,
+      no_db_justification: justification,
+      no_db_reason_text: justification?.reason_text || "",
+      no_db_technical_basis: justification?.technical_basis || null,
+      compared_candidates: justification?.compared_candidates || [],
       match_manual: true,
       manual_search_used: false,
       reference: defaultReferenceForDataset(activeConfig),
@@ -488,6 +511,16 @@ export default function App() {
       };
       return applyNoDbReferenceForDataset(missingItem, activeConfig.type);
     }) }));
+  }
+
+  function confirmNoDbJustification(justification) {
+    if (!pendingNoDb) return;
+    if (pendingNoDb.scope === "group") {
+      markGroupMissing(pendingNoDb.group, justification);
+    } else {
+      markMissing(pendingNoDb.items[0].id, justification);
+    }
+    setPendingNoDb(null);
   }
 
   function resolveIndividually(itemId) {
@@ -754,14 +787,23 @@ export default function App() {
       <Stepper current={currentStep} />
       <ProcessingOverlay processing={processing} onCancel={() => { cancelRef.current.cancelled = true; }} />
       {toast && <button className="toast" onClick={() => setToast("")}>{toast}</button>}
+      {pendingNoDb && (
+        <NoDbJustificationModal
+          items={pendingNoDb.items}
+          scope={pendingNoDb.scope}
+          groupLabel={pendingNoDb.group?.label || ""}
+          onClose={() => setPendingNoDb(null)}
+          onConfirm={confirmNoDbJustification}
+        />
+      )}
       <div className="load-grid">
         <UploadPanel datasetKey={activeDatasetKey} title={activeDatasetKey === "soldThermal" ? "Cargar vehículos vendidos" : "Cargar vehículos comprados eléctricos"} help={activeConfig.help} onRows={handleRows} onError={setToast} />
         <PastePanel title={activeDatasetKey === "soldThermal" ? "Pegar vehículos vendidos" : "Pegar vehículos eléctricos"} onRows={handleRows} onError={setToast} />
       </div>
       <ValidationSummary validation={validation} />
       <MatchSummaryCards items={items} alerts={validation?.alerts || []} />
-      <VehiclesTable items={items} datasetType={activeConfig.type} resetKey={`${activeDatasetKey}:${activeDataset.tableVersion || 0}`} onSelect={setSelected} onMarkMissing={markMissing} />
-      <ConflictResolver groups={conflictGroups} index={index} onAssign={assignCandidate} onAssignGroup={assignCandidateToGroup} onApplySimilar={applySimilar} onMarkMissing={markMissing} onMarkGroupMissing={markGroupMissing} onResolveIndividually={resolveIndividually} onSelect={setSelected} />
+      <VehiclesTable items={items} datasetType={activeConfig.type} resetKey={`${activeDatasetKey}:${activeDataset.tableVersion || 0}`} onSelect={setSelected} onMarkMissing={openNoDbJustification} />
+      <ConflictResolver groups={conflictGroups} index={index} onAssign={assignCandidate} onAssignGroup={assignCandidateToGroup} onApplySimilar={applySimilar} onMarkMissing={openNoDbJustification} onMarkGroupMissing={openGroupNoDbJustification} onResolveIndividually={resolveIndividually} onSelect={setSelected} />
       <MissingReferencePanel items={items} onUpdate={updateMissingReference} />
       <ManualDbSearch index={index} selectedItem={selectedFresh} onAssign={assignCandidate} />
       <ExportPanel items={items} datasets={datasets} activeDatasetKey={activeDatasetKey} learningRules={learningRules} learningCount={learningRules.length} pairing={pairing} onExportLearning={exportLearningRules} onImportLearning={handleImportLearning} onClearLearning={handleClearLearning} />

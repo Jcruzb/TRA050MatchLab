@@ -1,4 +1,5 @@
 import { normalizeHeader, parseLooseDate, parseNumber } from "./normalize.js";
+import { parseCilindradaCc, parseEmisionesGco2Km, parsePotenciaCv } from "./technicalSpecs.js";
 
 export const DATASET_TYPES = {
   soldThermal: "sold_thermal",
@@ -55,6 +56,7 @@ const CANONICAL_FIELDS = {
   cilindrada: ["cilindrada_nuevo", "cilindrada_vendido", "cilindrada_comprado", "cilindrada"],
   combustible_motorizacion: ["combustible_motorizacion_nuevo", "combustible_motorizacion_vendido", "combustible_motorizacion_comprado", "combustible_motorizacion"],
   potencia: ["potencia_nuevo", "potencia_vendido", "potencia_comprado", "potencia"],
+  emisiones_wltp_gco2_km: ["emisiones_wltp_gco2_km", "emisiones_wltp", "emisiones_gco2_km", "emisiones_wltp_g_co2_km", "emisiones_segun_ciclo_wltp", "emisiones"],
   tipo_cambio: ["tipo_cambio_nuevo", "tipo_cambio_vendido", "tipo_cambio_comprado", "tipo_cambio"],
   carroceria: ["carroceria_nuevo", "carroceria_vendido", "carroceria_comprado", "carroceria"],
   version_acabado: ["version_acabado_nuevo", "version_acabado_vendido", "version_acabado_comprado", "version_acabado"],
@@ -63,7 +65,7 @@ const CANONICAL_FIELDS = {
   observaciones: ["observaciones_nuevo", "observaciones_vendido", "observaciones_comprado", "observaciones"]
 };
 
-const REQUIRED_CANONICAL = ["categoria", "matricula", "marca_modelo", "fecha_matriculacion", "fecha_operacion", "contrato_factura", "precio_sin_iva"];
+const REQUIRED_CANONICAL = ["categoria", "matricula", "marca_modelo", "fecha_matriculacion", "fecha_operacion"];
 
 function getValue(row, aliases) {
   const normalizedEntries = Object.entries(row).map(([key, value]) => [normalizeHeader(key), value]);
@@ -83,6 +85,9 @@ export function normalizeDatasetRows(rows, config) {
         source_row_index: index + 2,
         original_row: row,
         ...canonical,
+        cilindrada_cc: parseCilindradaCc(canonical.cilindrada),
+        potencia_cv: parsePotenciaCv(canonical.potencia),
+        emisiones_wltp_gco2_km_num: parseEmisionesGco2Km(canonical.emisiones_wltp_gco2_km),
         fecha_operacion_tipo: config.operationType,
         match_pair_id: null,
         pair_status: "not_paired",
@@ -100,6 +105,7 @@ export function normalizeDatasetRows(rows, config) {
         Cilindrada_Nuevo: canonical.cilindrada,
         Combustible_Motorizacion_Nuevo: canonical.combustible_motorizacion,
         Potencia_Nuevo: canonical.potencia,
+        Emisiones_WLTP_gCO2_km: canonical.emisiones_wltp_gco2_km,
         Tipo_Cambio_Nuevo: canonical.tipo_cambio,
         Carroceria_Nuevo: canonical.carroceria,
         Version_Acabado_Nuevo: canonical.version_acabado,
@@ -130,6 +136,7 @@ export function validateDatasetRows(rows, config) {
     if (row.fecha_operacion && !parseLooseDate(row.fecha_operacion)) alerts.push({ type: "Advertencia", message: `La fila ${excelRow} tiene ${config.operationLabel.toLowerCase()} inválida.` });
     if (row.fecha_matriculacion && !parseLooseDate(row.fecha_matriculacion)) alerts.push({ type: "Advertencia", message: `La fila ${excelRow} tiene fecha de matriculación inválida.` });
     if (row.precio_sin_iva && parseNumber(row.precio_sin_iva) === null) alerts.push({ type: "Advertencia", message: `La fila ${excelRow} tiene un precio que no parece numérico.` });
+    if (row.emisiones_wltp_gco2_km && parseEmisionesGco2Km(row.emisiones_wltp_gco2_km) === null) alerts.push({ type: "Advertencia", message: `La fila ${excelRow} tiene emisiones WLTP no numéricas. Unidad esperada: g CO2/km.` });
     const plate = String(row.matricula || "").toUpperCase().replace(/\s+/g, "");
     if (plate) seen.set(plate, [...(seen.get(plate) || []), excelRow]);
   });

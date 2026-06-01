@@ -1,4 +1,5 @@
 import { X } from "lucide-react";
+import { formatCilindradaCc, formatEmisionesGco2Km, formatPotenciaCv } from "../utils/technicalSpecs.js";
 
 function valueOrDash(value) {
   if (value === null || value === undefined || value === "") return "-";
@@ -62,8 +63,9 @@ export default function VehicleDetailModal({ item, onClose }) {
             ["Contrato/factura", input.contrato_factura || input["Nº Contrato/Factura"] || input["NÂº Contrato/Factura"] || input["NÃ‚Âº Contrato/Factura"]],
             ["Precio sin IVA", input.precio_sin_iva || input["Precio (SIN IVA)"]],
             ["Combustible/motorizacion", input.Combustible_Motorizacion_Nuevo || input.combustible_motorizacion],
-            ["Cilindrada", input.Cilindrada_Nuevo || input.cilindrada],
-            ["Potencia", input.Potencia_Nuevo || input.potencia],
+            ["Cilindrada", formatCilindradaCc(input.cilindrada_cc || input.Cilindrada_Nuevo || input.cilindrada)],
+            ["Potencia", formatPotenciaCv(input.potencia_cv || input.Potencia_Nuevo || input.potencia)],
+            ["Emisiones WLTP", formatEmisionesGco2Km(input.emisiones_wltp_gco2_km_num || input.Emisiones_WLTP_gCO2_km || input.emisiones_wltp_gco2_km)],
             ["Tipo de cambio", input.Tipo_Cambio_Nuevo || input.tipo_cambio],
             ["Carroceria", input.Carroceria_Nuevo || input.carroceria],
             ["Version/acabado", input.Version_Acabado_Nuevo || input.version_acabado],
@@ -81,6 +83,15 @@ export default function VehicleDetailModal({ item, onClose }) {
             ["Resuelto como grupo", item.resolved_as_group],
             ["Grupo", item.conflict_group_label || item.group_resolution_key],
             ["Explicacion del match", item.explicacion_match]
+          ]} />
+
+          <Section title="Justificacion No DB" fields={[
+            ["Motivo", item.no_db_reason_text || item.no_db_justification?.reason_text],
+            ["Ambito", item.no_db_justification?.applied_scope],
+            ["Cilindrada real", formatCilindradaCc(item.no_db_technical_basis?.cilindrada_cc || item.no_db_justification?.technical_basis?.cilindrada_cc)],
+            ["Potencia real", formatPotenciaCv(item.no_db_technical_basis?.potencia_cv || item.no_db_justification?.technical_basis?.potencia_cv)],
+            ["Emisiones WLTP reales", formatEmisionesGco2Km(item.no_db_technical_basis?.emisiones_wltp_gco2_km || item.no_db_justification?.technical_basis?.emisiones_wltp_gco2_km)],
+            ["Candidatos comparados", tableValue(item.compared_candidates || item.no_db_justification?.compared_candidates)]
           ]} />
 
           <Section title="Consumo TRA050" fields={[
