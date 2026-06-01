@@ -65,6 +65,11 @@ export async function importLearningRules(file) {
   return persist(imported);
 }
 
+export function replaceLearningRules(rules) {
+  if (!Array.isArray(rules)) return loadLearningRules();
+  return persist(rules);
+}
+
 export function clearLearningRules() {
   return persist([]);
 }

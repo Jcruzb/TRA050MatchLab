@@ -54,7 +54,7 @@ h3 { margin: 18px 0 10px; font-size: 15px; }
 .muted { color: #66758a; margin: 6px 0 12px; }
 textarea { width: 100%; min-height: 126px; resize: vertical; border: 1px solid #d7e1e8; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
 input, select { border: 1px solid #d7e1e8; border-radius: 8px; padding: 10px 12px; background: white; min-height: 40px; }
-label.file-button { position: relative; overflow: hidden; background: #243242; color: #fff; border-radius: 8px; padding: 10px 14px; font-weight: 800; cursor: pointer; }
+label.file-button { position: relative; overflow: hidden; background: #243242; color: #fff; border-radius: 8px; padding: 10px 14px; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; min-height: 40px; }
 label.file-button.secondary { background: #eef3f5; color: #243242; border: 1px solid #d7e0e6; }
 label.file-button input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .inline-loader { display: flex; align-items: center; gap: 10px; background: #f6f8fa; border: 1px solid #dfe7ec; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; color: #405065; }

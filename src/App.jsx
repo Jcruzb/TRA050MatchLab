@@ -18,11 +18,12 @@ import { TRA050_CONSUMO_REFERENCIA_NUEVO_ELECTRICO } from "./data/tra050-referen
 import { buildSearchIndex, matchRowsInChunks, MATCH_MEANINGS, MATCH_STATES } from "./utils/matchEngine.js";
 import { normalizeText } from "./utils/normalize.js";
 import { groupConflictResults } from "./utils/groupConflicts.js";
-import { clearLearningRules, exportLearningRules, importLearningRules, loadLearningRules, saveLearningRule } from "./engine/vehicleLearning.js";
+import { clearLearningRules, exportLearningRules, importLearningRules, loadLearningRules, replaceLearningRules, saveLearningRule } from "./engine/vehicleLearning.js";
 import { createEmptyDataset, DATASET_CONFIG, validateDatasetRows } from "./utils/datasets.js";
 import { applyPairsToDatasets, autoPairVehicles, buildPairingCandidates, prepareVehiclesForPairing, validatePairingIntegrity } from "./tra050/tra050Pairing.js";
 import { exportFinalTra050Excel } from "./tra050/tra050PairExport.js";
 import { applyTra050ReferenceResolution } from "./tra050/tra050ReferenceResolver.js";
+import { buildProjectSessionJson, loadProjectSession, saveProjectSession } from "./utils/projectSession.js";
 
 const STORAGE_KEY = "tra050-matchlab-session";
 const EMPTY_PAIRING = { pairs: [], unpairedSold: [], unpairedPurchased: [], candidates: [], warnings: [], summary: {}, integrity: null, updatedAt: null, annualMileageKm: "" };
@@ -546,6 +547,61 @@ export default function App() {
     setToast("Sesion local limpiada.");
   }
 
+  function hasProjectData() {
+    return Boolean(
+      (datasets.soldThermal?.matchResults || []).length
+      || (datasets.purchasedElectric?.matchResults || []).length
+      || (pairing.pairs || []).length
+    );
+  }
+
+  async function handleSaveProjectSession() {
+    try {
+      const session = buildProjectSessionJson({
+        datasets,
+        pairing,
+        learningRules,
+        settings: {
+          activeTab: activeDatasetKey,
+          defaultAnnualMileage: pairing.annualMileageKm || null
+        }
+      });
+      const result = await saveProjectSession(session);
+      setToast(result.usedPicker
+        ? "Sesion exportada correctamente."
+        : "Sesion exportada correctamente. Tu navegador descargara el archivo en la carpeta de descargas configurada.");
+    } catch (error) {
+      if (error?.name === "AbortError") return;
+      setToast(error.message || "No se pudo guardar la sesion del proyecto.");
+    }
+  }
+
+  async function handleLoadProjectSessionFile(file) {
+    if (hasProjectData()) {
+      const ok = window.confirm("Ya hay un proyecto cargado. Si cargas esta sesion, se reemplazaran los datos actuales.\n\nQuieres continuar?");
+      if (!ok) return;
+    }
+    try {
+      const hydrated = await loadProjectSession(file);
+      setDatasets(resolveNoDbReferencesInDatasets(hydrated.datasets));
+      setPairing({ ...EMPTY_PAIRING, ...hydrated.pairing });
+      if (hydrated.learningRulesIncluded) setLearningRules(replaceLearningRules(hydrated.learningRules));
+      setSelected(null);
+      const tab = hydrated.settings?.activeTab;
+      const tabMap = { sold_thermal: "soldThermal", purchased_electric: "purchasedElectric" };
+      const nextTab = tabMap[tab] || tab;
+      if (["soldThermal", "purchasedElectric", "pairing"].includes(nextTab)) setActiveDatasetKey(nextTab);
+      const soldCount = hydrated.datasets.soldThermal.matchResults.length;
+      const purchasedCount = hydrated.datasets.purchasedElectric.matchResults.length;
+      const pairCount = hydrated.pairing.pairs.length;
+      const unpairedCount = hydrated.pairing.unpairedSold.length + hydrated.pairing.unpairedPurchased.length;
+      const warnings = hydrated.warnings.length ? ` ${hydrated.warnings.join(" ")}` : "";
+      setToast(`Sesion cargada correctamente: ${soldCount} vehiculos vendidos/termicos, ${purchasedCount} vehiculos comprados/electricos, ${pairCount} parejas generadas, ${unpairedCount} vehiculos no emparejados.${warnings}`);
+    } catch (error) {
+      setToast(error.message || "El archivo seleccionado no parece ser una sesion valida de TRA050 MatchLab.");
+    }
+  }
+
   async function handleImportLearning(file) {
     try {
       setLearningRules(await importLearningRules(file));
@@ -650,7 +706,7 @@ export default function App() {
 
   return (
     <main>
-      <AppHeader dbCount={index.length} onClear={clearSession} />
+      <AppHeader dbCount={index.length} onClear={clearSession} onSaveProjectSession={handleSaveProjectSession} onLoadProjectSession={handleLoadProjectSessionFile} />
       <nav className="workspace-tabs" aria-label="Espacios de trabajo">
         {Object.values(DATASET_CONFIG).map((config) => (
           <button key={config.key} className={activeDatasetKey === config.key ? "active" : "ghost"} onClick={() => { setActiveDatasetKey(config.key); setSelected(null); }}>
