@@ -1,5 +1,5 @@
 import { dateToYear, normalizeText, parseNumber, tokenize } from "./normalize.js";
-import { parseCilindradaCc, parseEmisionesGco2Km, parsePotenciaCv } from "./technicalSpecs.js";
+import { convertKwToCv, parseCilindradaCc, parseEmisionesGco2Km, parsePotenciaCv, parsePowerKw } from "./technicalSpecs.js";
 
 export const BRAND_ALIASES = {
   peugeot: ["peugeot", "peuge", "peug", "pgt"],
@@ -265,7 +265,8 @@ export function featuresFromUser(row, brandIndex, modelBrandIndex) {
     cilindrada: extractCilindrada(`${row.Cilindrada_Nuevo || ""} ${rawText}`),
     cilindradaCc: extractCilindrada(`${row.Cilindrada_Nuevo || ""} ${rawText}`),
     motorizacion: extractMotorizacion(row.Combustible_Motorizacion_Nuevo, rawText),
-    potenciaCv: extractPowerCv(row.Potencia_Nuevo),
+    potenciaTermicaKw: parsePowerKw(row.potencia_termica_kw || row.Potencia_Termica_kW_Nuevo || row.Potencia_Nuevo),
+    potenciaCv: row.potencia_cv_calculada || convertKwToCv(parsePowerKw(row.potencia_termica_kw || row.Potencia_Termica_kW_Nuevo || row.Potencia_Nuevo)),
     emisionesWltpGco2Km: parseEmisionesGco2Km(row.Emisiones_WLTP_gCO2_km || row.emisiones_wltp_gco2_km),
     cambio: extractCambio(row.Tipo_Cambio_Nuevo, rawText),
     tipoCambio: extractCambio(row.Tipo_Cambio_Nuevo, rawText),

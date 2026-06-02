@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { formatCilindradaCc, formatEmisionesGco2Km, formatPotenciaCv } from "../utils/technicalSpecs.js";
+import { formatCilindradaCc, formatEmisionesGco2Km, formatPotenciaCv, formatPowerKw } from "../utils/technicalSpecs.js";
 
 function valueOrDash(value) {
   if (value === null || value === undefined || value === "") return "-";
@@ -64,7 +64,8 @@ export default function VehicleDetailModal({ item, onClose }) {
             ["Precio sin IVA", input.precio_sin_iva || input["Precio (SIN IVA)"]],
             ["Combustible/motorizacion", input.Combustible_Motorizacion_Nuevo || input.combustible_motorizacion],
             ["Cilindrada", formatCilindradaCc(input.cilindrada_cc || input.Cilindrada_Nuevo || input.cilindrada)],
-            ["Potencia", formatPotenciaCv(input.potencia_cv || input.Potencia_Nuevo || input.potencia)],
+            ["Potencia termica cargada", formatPowerKw(input.potencia_termica_kw || input.Potencia_Termica_kW_Nuevo || input.Potencia_Nuevo || input.potencia)],
+            ["Potencia cargada equivalente", formatPotenciaCv(input.potencia_cv_calculada || input.potencia_cv)],
             ["Emisiones WLTP", formatEmisionesGco2Km(input.emisiones_wltp_gco2_km_num || input.Emisiones_WLTP_gCO2_km || input.emisiones_wltp_gco2_km)],
             ["Tipo de cambio", input.Tipo_Cambio_Nuevo || input.tipo_cambio],
             ["Carroceria", input.Carroceria_Nuevo || input.carroceria],

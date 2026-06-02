@@ -24,7 +24,7 @@ export default function ExportPanel({ items, datasets, activeDatasetKey, learnin
           Importar reglas
           <input type="file" accept=".json" onChange={(event) => event.target.files?.[0] && onImportLearning(event.target.files[0])} />
         </label>
-        <button className="ghost" onClick={onClearLearning}>Limpiar reglas</button>
+        <button className="ghost danger-action" onClick={onClearLearning}>Limpiar reglas</button>
       </div>
     </section>
   );

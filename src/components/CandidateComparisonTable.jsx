@@ -1,6 +1,6 @@
 import { buildVehicleTechnicalComparison } from "../utils/technicalSpecs.js";
 
-const ORDER = ["marca", "modelo", "year", "motorizacion", "cambio", "cilindrada", "potencia", "emisiones", "carroceria", "potencia_electrica", "consumo_electrico"];
+const ORDER = ["marca", "modelo", "year", "motorizacion", "cambio", "cilindrada", "potencia_termica", "potencia", "potencia_electrica", "emisiones", "carroceria", "consumo_electrico"];
 
 function tone(status) {
   if (status === "match" || status === "compatible") return "ok";

@@ -1,6 +1,7 @@
 import { normalizeText, parseNumber } from "./normalize.js";
 
 const EMPTY = "-";
+export const KW_TO_CV = 1.35802469;
 
 function firstNumber(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -27,8 +28,24 @@ export function parsePotenciaCv(value) {
   const number = firstNumber(value);
   if (number === null) return null;
   const text = normalizeText(value);
-  if (text.includes("kw") && !text.includes("cv")) return Number((number * 1.35962).toFixed(1));
   return Number(number.toFixed(1));
+}
+
+export function parsePowerKw(value) {
+  const number = firstNumber(value);
+  return number === null ? null : Number(number.toFixed(1));
+}
+
+export function convertKwToCv(kw) {
+  const number = Number(kw);
+  return Number.isFinite(number) ? Number((number * KW_TO_CV).toFixed(1)) : null;
+}
+
+export function parseUserPowerKwToCv(value) {
+  const text = normalizeText(value);
+  if (text.includes("cv") && !text.includes("kw")) return parsePotenciaCv(value);
+  const kw = parsePowerKw(value);
+  return convertKwToCv(kw);
 }
 
 export function parseEmisionesGco2Km(value) {
@@ -47,14 +64,18 @@ export function formatPotenciaCv(value) {
   return `${parsed.toLocaleString("es-ES", { maximumFractionDigits: 1 })} cv`;
 }
 
+export function formatPowerKw(value) {
+  const parsed = parsePowerKw(value);
+  return parsed === null ? EMPTY : `${parsed.toLocaleString("es-ES", { maximumFractionDigits: 1 })} kW`;
+}
+
 export function formatEmisionesGco2Km(value) {
   const parsed = parseEmisionesGco2Km(value);
   return parsed === null ? EMPTY : `${parsed.toLocaleString("es-ES")} g CO2/km`;
 }
 
 export function formatKw(value) {
-  const parsed = firstNumber(value);
-  return parsed === null ? EMPTY : `${parsed.toLocaleString("es-ES", { maximumFractionDigits: 1 })} kW`;
+  return formatPowerKw(value);
 }
 
 export function formatConsumption(value, unit = "L/100km") {
@@ -134,7 +155,14 @@ export function buildVehicleTechnicalComparison(vehicleOrFeatures = {}, candidat
   const features = vehicleOrFeatures.userFeatures || vehicleOrFeatures;
   const wltp = candidate.raw?.tabla_wltp || {};
   const userCilindrada = parseCilindradaCc(rawValue(input, "cilindrada_cc", "Cilindrada_Nuevo", "cilindrada") || features.cilindradaCc);
-  const userPotencia = parsePotenciaCv(rawValue(input, "potencia_cv", "Potencia_Nuevo", "potencia") || features.potenciaCv);
+  const userPowerKw = parsePowerKw(rawValue(input, "potencia_termica_kw", "Potencia_Termica_kW_Nuevo", "Potencia_Termica_kW_Vendido", "Potencia_Nuevo", "potencia") || features.potenciaTermicaKw);
+  const userPotencia = parsePotenciaCv(rawValue(input, "potencia_cv_calculada", "potencia_cv") || features.potenciaCv) || convertKwToCv(userPowerKw);
+  const idaePowerKw = parsePowerKw(candidate.potenciaTermicaKw || detailValue(candidate, "Potencia térmica"));
+  const thermalPowerResult = numericComparison(userPowerKw, idaePowerKw, "kW", "kW", "Potencia termica", { compatible: 3.7, doubtful: 11 }, formatPowerKw);
+  const equivalentPowerResult = numericComparison(userPotencia, candidate.potenciaCv, "cv", "cv", "Potencia equivalente", { compatible: 5, doubtful: 15 }, formatPotenciaCv);
+  if (equivalentPowerResult.status !== "missing") {
+    equivalentPowerResult.explanation = `Potencia ${equivalentPowerResult.status === "match" ? "compatible" : equivalentPowerResult.status_label.toLowerCase()}: el dato cargado es ${formatPowerKw(userPowerKw)}, equivalente a ${formatPotenciaCv(userPotencia)}; IDAE indica ${formatPotenciaCv(candidate.potenciaCv)}.`;
+  }
   const userEmisiones = parseEmisionesGco2Km(rawValue(input, "emisiones_wltp_gco2_km_num", "Emisiones_WLTP_gCO2_km", "emisiones_wltp_gco2_km") || features.emisionesWltpGco2Km);
   const idaeEmisiones = parseEmisionesGco2Km(candidate.emisionesWltpGco2Km || detailValue(candidate, "Emisiones según ciclo WLTP") || wltp.emisiones_minimo || wltp.emisiones_maximo);
   const userMarca = features.brand || normalizeText(rawValue(input, "marca_modelo", "Marca_modelo_Nuevo")).split(" ")[0] || "";
@@ -197,16 +225,27 @@ export function buildVehicleTechnicalComparison(vehicleOrFeatures = {}, candidat
       idaeUnit: "cc",
       result: numericComparison(userCilindrada, candidate.cilindradaCc, "cc", "cc", "Cilindrada", { compatible: 20, doubtful: 100 }, formatCilindradaCc)
     }),
+    potencia_termica: comparisonEntry({
+      field: "potencia_termica",
+      label: "Potencia termica",
+      userValue: userPowerKw,
+      userDisplay: formatPowerKw(userPowerKw),
+      userUnit: "kW",
+      idaeValue: idaePowerKw ?? "",
+      idaeDisplay: formatPowerKw(idaePowerKw),
+      idaeUnit: "kW",
+      result: thermalPowerResult
+    }),
     potencia: comparisonEntry({
       field: "potencia",
-      label: "Potencia",
+      label: "Potencia equivalente",
       userValue: userPotencia,
-      userDisplay: formatPotenciaCv(userPotencia),
+      userDisplay: userPowerKw !== null ? `${formatPowerKw(userPowerKw)} = ${formatPotenciaCv(userPotencia)}` : formatPotenciaCv(userPotencia),
       userUnit: "cv",
       idaeValue: candidate.potenciaCv ?? "",
       idaeDisplay: formatPotenciaCv(candidate.potenciaCv),
       idaeUnit: "cv",
-      result: numericComparison(userPotencia, candidate.potenciaCv, "cv", "cv", "Potencia", { compatible: 5, doubtful: 15 }, formatPotenciaCv)
+      result: equivalentPowerResult
     }),
     emisiones: comparisonEntry({
       field: "emisiones",
@@ -280,8 +319,8 @@ export function buildCandidateComparisonMatrix(userVehicle = {}, candidates = []
     ["motorizacion", "Combustible / motorización", () => comparisons.values().next().value?.motorizacion?.user_display],
     ["cambio", "Tipo de cambio", () => comparisons.values().next().value?.cambio?.user_display],
     ["cilindrada", "Cilindrada", () => comparisons.values().next().value?.cilindrada?.user_display],
-    ["potencia", "Potencia", () => comparisons.values().next().value?.potencia?.user_display],
-    ["potencia_termica", "Potencia térmica", () => EMPTY, (candidate) => formatKw(candidate.potenciaTermicaKw || candidateDetail(candidate, "Potencia térmica"))],
+    ["potencia_termica", "Potencia termica", () => comparisons.values().next().value?.potencia_termica?.user_display, (candidate) => formatKw(candidate.potenciaTermicaKw || candidateDetail(candidate, "Potencia térmica"))],
+    ["potencia", "Potencia equivalente", () => comparisons.values().next().value?.potencia?.user_display],
     ["potencia_electrica", "Potencia eléctrica", () => EMPTY, (candidate) => formatKw(candidate.potenciaElectricaKw || candidateDetail(candidate, "Potencia eléctrica"))],
     ["emisiones", "Emisiones WLTP", () => comparisons.values().next().value?.emisiones?.user_display],
     ["consumo_medio", "Consumo medio WLTP", () => EMPTY, (candidate) => formatConsumption(candidate.consumoLitros100 || candidate.raw?.tabla_wltp?.consumo_minimo || candidate.raw?.tabla_wltp?.consumo_maximo, "L/100km")],
@@ -294,7 +333,7 @@ export function buildCandidateComparisonMatrix(userVehicle = {}, candidates = []
   return {
     fields: fieldDefs.map(([key, label, userGetter, candidateGetter]) => ({
       key,
-      label,
+      label: comparisons.values().next().value?.[key]?.label || label,
       userValue: userGetter() || EMPTY,
       candidates: safeCandidates.map((candidate) => {
         const structured = comparisons.get(candidate.id_idae)?.[key];
@@ -329,7 +368,7 @@ export function compareTechnicalValue(userValue, dbValue, tolerances, label, for
 export function compareTechnicalSpecs(user = {}, candidate = {}) {
   return {
     cilindrada: compareTechnicalValue(user.cilindradaCc, candidate.cilindradaCc, { compatible: 20, doubtful: 100 }, "cilindrada", formatCilindradaCc),
-    potencia: compareTechnicalValue(user.potenciaCv, candidate.potenciaCv, { compatible: 5, doubtful: 15 }, "potencia", formatPotenciaCv),
+    potencia: compareTechnicalValue(user.potenciaCv || convertKwToCv(user.potenciaTermicaKw), candidate.potenciaCv, { compatible: 5, doubtful: 15 }, "potencia", formatPotenciaCv),
     emisiones: compareTechnicalValue(user.emisionesWltpGco2Km, candidate.emisionesWltpGco2Km, { compatible: 5, doubtful: 15 }, "emisiones", formatEmisionesGco2Km)
   };
 }
@@ -342,9 +381,14 @@ export function technicalScoreAdjustment(comparison, weight) {
 }
 
 export function normalizeTechnicalSpecs(vehicleOrCandidate = {}) {
+  const potenciaTermicaKw = parsePowerKw(vehicleOrCandidate.potencia_termica_kw ?? vehicleOrCandidate.potenciaTermicaKw ?? vehicleOrCandidate.Potencia_Termica_kW_Nuevo ?? vehicleOrCandidate.Potencia_Termica_kW_Vendido ?? vehicleOrCandidate.Potencia_Nuevo ?? vehicleOrCandidate.potencia);
   return {
     cilindrada_cc: parseCilindradaCc(vehicleOrCandidate.cilindrada_cc ?? vehicleOrCandidate.cilindradaCc ?? vehicleOrCandidate.Cilindrada_Nuevo ?? vehicleOrCandidate.cilindrada),
-    potencia_cv: parsePotenciaCv(vehicleOrCandidate.potencia_cv ?? vehicleOrCandidate.potenciaCv ?? vehicleOrCandidate.Potencia_Nuevo ?? vehicleOrCandidate.potencia),
+    potencia_termica_kw: potenciaTermicaKw,
+    potencia_cv_calculada: convertKwToCv(potenciaTermicaKw),
+    potencia_cv_conversion_factor: KW_TO_CV,
+    potencia_origen: "plantilla_kw",
+    potencia_cv: parsePotenciaCv(vehicleOrCandidate.potencia_cv ?? vehicleOrCandidate.potenciaCv) || convertKwToCv(potenciaTermicaKw),
     emisiones_wltp_gco2_km: parseEmisionesGco2Km(vehicleOrCandidate.emisiones_wltp_gco2_km ?? vehicleOrCandidate.emisionesWltpGco2Km ?? vehicleOrCandidate.Emisiones_WLTP_gCO2_km ?? vehicleOrCandidate.emisiones)
   };
 }

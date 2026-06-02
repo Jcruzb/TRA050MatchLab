@@ -1,7 +1,7 @@
 import * as XLSX from "xlsx";
 import { flattenResult } from "../utils/exportResults.js";
 
-export function exportFinalTra050Excel({ pairs, datasets, warnings, unpairedSold = [], unpairedPurchased = [] }) {
+export function exportFinalTra050Excel({ pairs, datasets, warnings, unpairedSold = [], unpairedPurchased = [], reviewChangeLog = [] }) {
   const wb = XLSX.utils.book_new();
   const soldById = new Map((datasets.soldThermal.matchResults || []).map((item) => [item.id, item]));
   const purchasedById = new Map((datasets.purchasedElectric.matchResults || []).map((item) => [item.id, item]));
@@ -58,6 +58,10 @@ export function exportFinalTra050Excel({ pairs, datasets, warnings, unpairedSold
     pair_status: pair.pair_status,
     pair_locked: pair.pair_locked,
     pair_manual_override: pair.pair_manual_override,
+    pair_review_status: pair.pair_review_status || "pending_review",
+    pair_review_notes: pair.pair_review_notes || "",
+    pair_reviewed_at: pair.pair_reviewed_at || "",
+    pair_review_locked: Boolean(pair.pair_review_locked),
     warnings: (pair.warnings || []).join(" | ")
   }))), "01_Pares_TRA050");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet((datasets.soldThermal.matchResults || []).map(flattenResult)), "02_Vehiculos_vendidos");
@@ -72,5 +76,17 @@ export function exportFinalTra050Excel({ pairs, datasets, warnings, unpairedSold
     ...(pair.errores_calculo || []).map((message) => ({ match_pair_id: pair.match_pair_id, type: "error_calculo", message }))
   ]);
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([...(warnings || []), ...pairWarnings]), "05_Advertencias");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet((reviewChangeLog || []).map((entry) => ({
+    change_id: entry.id,
+    fecha: entry.created_at,
+    scope: entry.scope,
+    accion: entry.action,
+    dataset: entry.dataset_type || "",
+    matricula: (entry.row_ids || []).join(", "),
+    match_pair_id: (entry.match_pair_ids || []).join(", "),
+    valor_anterior: JSON.stringify(entry.previous_value || {}),
+    valor_nuevo: JSON.stringify(entry.new_value || {}),
+    nota_usuario: entry.user_note || entry.reason || ""
+  }))), "06_Revision_y_cambios");
   XLSX.writeFile(wb, "tra050-emparejamiento-final.xlsx");
 }

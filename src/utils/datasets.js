@@ -1,5 +1,5 @@
 import { normalizeHeader, parseLooseDate, parseNumber } from "./normalize.js";
-import { parseCilindradaCc, parseEmisionesGco2Km, parsePotenciaCv } from "./technicalSpecs.js";
+import { KW_TO_CV, convertKwToCv, parseCilindradaCc, parseEmisionesGco2Km, parsePowerKw } from "./technicalSpecs.js";
 
 export const DATASET_TYPES = {
   soldThermal: "sold_thermal",
@@ -55,7 +55,7 @@ const CANONICAL_FIELDS = {
   precio_sin_iva: ["precio_sin_iva", "precio_sin_iva"],
   cilindrada: ["cilindrada_nuevo", "cilindrada_vendido", "cilindrada_comprado", "cilindrada"],
   combustible_motorizacion: ["combustible_motorizacion_nuevo", "combustible_motorizacion_vendido", "combustible_motorizacion_comprado", "combustible_motorizacion"],
-  potencia: ["potencia_nuevo", "potencia_vendido", "potencia_comprado", "potencia"],
+  potencia: ["potencia_termica_kw_nuevo", "potencia_termica_kw_vendido", "potencia_termica_kw", "potencia_kw", "potencia_termica", "potencia_nuevo", "potencia_vendido", "potencia_comprado", "potencia"],
   emisiones_wltp_gco2_km: ["emisiones_wltp_gco2_km", "emisiones_wltp", "emisiones_gco2_km", "emisiones_wltp_g_co2_km", "emisiones_segun_ciclo_wltp", "emisiones"],
   tipo_cambio: ["tipo_cambio_nuevo", "tipo_cambio_vendido", "tipo_cambio_comprado", "tipo_cambio"],
   carroceria: ["carroceria_nuevo", "carroceria_vendido", "carroceria_comprado", "carroceria"],
@@ -86,7 +86,10 @@ export function normalizeDatasetRows(rows, config) {
         original_row: row,
         ...canonical,
         cilindrada_cc: parseCilindradaCc(canonical.cilindrada),
-        potencia_cv: parsePotenciaCv(canonical.potencia),
+        potencia_termica_kw: parsePowerKw(canonical.potencia),
+        potencia_cv_calculada: convertKwToCv(parsePowerKw(canonical.potencia)),
+        potencia_cv_conversion_factor: KW_TO_CV,
+        potencia_origen: canonical.potencia ? "plantilla_kw" : "",
         emisiones_wltp_gco2_km_num: parseEmisionesGco2Km(canonical.emisiones_wltp_gco2_km),
         fecha_operacion_tipo: config.operationType,
         match_pair_id: null,
@@ -105,6 +108,7 @@ export function normalizeDatasetRows(rows, config) {
         Cilindrada_Nuevo: canonical.cilindrada,
         Combustible_Motorizacion_Nuevo: canonical.combustible_motorizacion,
         Potencia_Nuevo: canonical.potencia,
+        Potencia_Termica_kW_Nuevo: canonical.potencia,
         Emisiones_WLTP_gCO2_km: canonical.emisiones_wltp_gco2_km,
         Tipo_Cambio_Nuevo: canonical.tipo_cambio,
         Carroceria_Nuevo: canonical.carroceria,

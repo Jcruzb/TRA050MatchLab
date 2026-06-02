@@ -14,6 +14,7 @@ import ExportPanel from "./components/ExportPanel.jsx";
 import ProcessingOverlay from "./components/ProcessingOverlay.jsx";
 import PairingWorkspace from "./components/PairingWorkspace.jsx";
 import NoDbJustificationModal from "./components/NoDbJustificationModal.jsx";
+import FinalReviewWorkspace from "./components/FinalReviewWorkspace.jsx";
 import { VEHICLE_DB } from "./data/vehicle-db.js";
 import { TRA050_CONSUMO_REFERENCIA_NUEVO_ELECTRICO } from "./data/tra050-reference.js";
 import { buildSearchIndex, matchRowsInChunks, MATCH_MEANINGS, MATCH_STATES } from "./utils/matchEngine.js";
@@ -24,7 +25,7 @@ import { createEmptyDataset, DATASET_CONFIG, validateDatasetRows } from "./utils
 import { applyPairsToDatasets, autoPairVehicles, buildPairingCandidates, prepareVehiclesForPairing, validatePairingIntegrity } from "./tra050/tra050Pairing.js";
 import { exportFinalTra050Excel } from "./tra050/tra050PairExport.js";
 import { applyTra050ReferenceResolution } from "./tra050/tra050ReferenceResolver.js";
-import { buildProjectSessionJson, loadProjectSession, saveProjectSession } from "./utils/projectSession.js";
+import { LARGE_PROJECT_VEHICLE_THRESHOLD, loadProjectSession, saveProjectSession, vehicleCount } from "./utils/projectSession.js";
 import { buildVehicleTechnicalComparison, compareTechnicalSpecs } from "./utils/technicalSpecs.js";
 
 const STORAGE_KEY = "tra050-matchlab-session";
@@ -136,11 +137,26 @@ function addDatasetWarnings(items, config) {
     return {
       ...item,
       dataset_type: config.type,
+      review_status: item.review_status || "pending_review",
+      review_notes: item.review_notes || "",
+      reviewed_at: item.reviewed_at || null,
+      reviewed_by: item.reviewed_by || null,
+      review_locked: Boolean(item.review_locked),
       expected_powertrain: config.expectedPowertrain,
       dataset_warning: warnings.join(" "),
       conflictos_detectados: [item.conflictos_detectados, ...warnings].filter(Boolean).join(" ")
     };
   });
+}
+
+function withPendingPairReview(pair) {
+  return {
+    ...pair,
+    pair_review_status: pair.pair_review_status || "pending_review",
+    pair_review_notes: pair.pair_review_notes || "",
+    pair_reviewed_at: pair.pair_reviewed_at || null,
+    pair_review_locked: Boolean(pair.pair_review_locked)
+  };
 }
 
 function slimCandidate(candidate) {
@@ -228,6 +244,9 @@ export default function App() {
   const [processing, setProcessing] = useState(null);
   const [learningRules, setLearningRules] = useState(() => loadLearningRules());
   const [pendingNoDb, setPendingNoDb] = useState(null);
+  const [reviewChangeLog, setReviewChangeLog] = useState([]);
+  const [lastLocalSavedAt, setLastLocalSavedAt] = useState(null);
+  const [lastExportedAt, setLastExportedAt] = useState(null);
   const cancelRef = useRef({ cancelled: false });
 
   useEffect(() => {
@@ -263,9 +282,12 @@ export default function App() {
         return;
       }
       const saved = JSON.parse(savedText || "null");
-      if (saved?.datasets) {
+      if (saved?.largeProject) {
+        setToast("Sesion local grande detectada: se conservaron solo metadatos para evitar bloqueos. Carga el JSON exportado para recuperar el proyecto completo.");
+      } else if (saved?.datasets) {
         setDatasets(resolveNoDbReferencesInDatasets(saved.datasets));
         if (saved.pairing) setPairing(saved.pairing);
+        if (Array.isArray(saved.reviewChangeLog)) setReviewChangeLog(saved.reviewChangeLog);
       } else if (saved?.items) {
         setDatasets((current) => ({
           ...current,
@@ -284,11 +306,27 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ datasets: makePersistableDatasets(datasets), pairing, editedAt: new Date().toISOString() }));
+      const editedAt = new Date().toISOString();
+      const totalVehicles = vehicleCount(datasets);
+      if (totalVehicles >= LARGE_PROJECT_VEHICLE_THRESHOLD) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+          largeProject: true,
+          vehicleCount: totalVehicles,
+          soldThermalCount: datasets.soldThermal?.matchResults?.length || 0,
+          purchasedElectricCount: datasets.purchasedElectric?.matchResults?.length || 0,
+          pairCount: pairing.pairs?.length || 0,
+          reviewChangeCount: reviewChangeLog.length,
+          editedAt,
+          note: "Proyecto grande no guardado completo en localStorage para evitar bloqueos del navegador. Usa Guardar sesion JSON."
+        }));
+      } else {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ datasets: makePersistableDatasets(datasets), pairing, reviewChangeLog, editedAt }));
+      }
+      setLastLocalSavedAt(editedAt);
     } catch (error) {
       console.warn("No se pudo persistir la sesión local completa.", error);
     }
-  }, [datasets, pairing]);
+  }, [datasets, pairing, reviewChangeLog]);
 
   const activeConfig = DATASET_CONFIG[activeDatasetKey];
   const activeDataset = datasets[activeDatasetKey] || {};
@@ -305,6 +343,48 @@ export default function App() {
       ...current,
       [activeDatasetKey]: updater(current[activeDatasetKey])
     }));
+  }
+
+  function addReviewLog(entry) {
+    setReviewChangeLog((current) => {
+      const id = `CHANGE-${String(current.length + 1).padStart(6, "0")}`;
+      return [{
+        id,
+        created_at: new Date().toISOString(),
+        scope: "vehicle",
+        action: "",
+        dataset_type: null,
+        row_ids: [],
+        match_pair_ids: [],
+        previous_value: {},
+        new_value: {},
+        reason: "",
+        user_note: "",
+        ...entry
+      }, ...current];
+    });
+  }
+
+  function updateVehicleById(itemId, updater, datasetKeyOverride = null) {
+    setDatasets((current) => {
+      const key = datasetKeyOverride || Object.keys(current).find((datasetKey) => (current[datasetKey]?.matchResults || []).some((item) => item.id === itemId));
+      if (!key) return current;
+      return {
+        ...current,
+        [key]: {
+          ...current[key],
+          matchResults: (current[key].matchResults || []).map((item) => item.id === itemId ? updater(item) : item)
+        }
+      };
+    });
+  }
+
+  function markChangedAfterReview(item) {
+    return {
+      ...item,
+      review_status: item.review_status === "reviewed" ? "changed_after_review" : item.review_status || "pending_review",
+      last_review_action: "changed_after_review"
+    };
   }
 
   async function handleRows(rows) {
@@ -356,7 +436,7 @@ export default function App() {
       if (!candidate) return item;
       const technical_comparison = buildVehicleTechnicalComparison(item, candidate);
       const technicalComparison = compareTechnicalSpecs(item.userFeatures || {}, candidate);
-      return {
+      return markChangedAfterReview({
         ...item,
         assigned: candidate,
         technical_comparison,
@@ -382,7 +462,7 @@ export default function App() {
         tra050_reference_confidence: "",
         tra050_reference_reason: "",
         observacion_consumo_referencia: ""
-      };
+      });
     }) }));
   }
 
@@ -408,7 +488,7 @@ export default function App() {
       if (!candidate) return item;
       const technical_comparison = buildVehicleTechnicalComparison(item, candidate);
       const technicalComparison = compareTechnicalSpecs(item.userFeatures || {}, candidate);
-      return {
+      return markChangedAfterReview({
         ...item,
         assigned: candidate,
         technical_comparison,
@@ -444,7 +524,7 @@ export default function App() {
         group_resolution_applied: true,
         group_resolution_timestamp: timestamp,
         group_resolution_mode: mode
-      };
+      });
     }) }));
   }
 
@@ -533,10 +613,142 @@ export default function App() {
     if (!pendingNoDb) return;
     if (pendingNoDb.scope === "group") {
       markGroupMissing(pendingNoDb.group, justification);
+      addReviewLog({ scope: "group", action: "mark_no_db", row_ids: pendingNoDb.items.map((item) => item.id), new_value: justification });
     } else {
       markMissing(pendingNoDb.items[0].id, justification);
+      addReviewLog({ scope: "vehicle", action: "mark_no_db", dataset_type: pendingNoDb.items[0].dataset_type, row_ids: [pendingNoDb.items[0].id], new_value: justification });
     }
     setPendingNoDb(null);
+  }
+
+  function markVehicleReviewed(item) {
+    const note = window.prompt("Nota de revision (opcional):", item.review_notes || "") || "";
+    updateVehicleById(item.id, (current) => ({
+      ...current,
+      review_status: "reviewed",
+      review_notes: note,
+      reviewed_at: new Date().toISOString(),
+      reviewed_by: "user",
+      last_review_action: "mark_reviewed"
+    }));
+    addReviewLog({ action: "mark_reviewed", dataset_type: item.dataset_type, row_ids: [item.id], user_note: note });
+  }
+
+  function toggleVehicleReviewLock(item, forceLocked = null) {
+    const nextLocked = forceLocked ?? !item.review_locked;
+    updateVehicleById(item.id, (current) => ({
+      ...current,
+      review_locked: nextLocked,
+      last_review_action: nextLocked ? "lock_reviewed" : "unlock_reviewed"
+    }));
+    addReviewLog({ action: nextLocked ? "lock_reviewed" : "unlock_reviewed", dataset_type: item.dataset_type, row_ids: [item.id] });
+  }
+
+  function markGroupReviewed(itemsToReview) {
+    const note = window.prompt("Nota para marcar el grupo como revisado (opcional):", "") || "";
+    const ids = new Set(itemsToReview.map((item) => item.id));
+    setDatasets((current) => Object.fromEntries(Object.entries(current).map(([key, dataset]) => [key, {
+      ...dataset,
+      matchResults: (dataset.matchResults || []).map((item) => ids.has(item.id) ? {
+        ...item,
+        review_status: "reviewed",
+        review_notes: note,
+        reviewed_at: new Date().toISOString(),
+        reviewed_by: "user",
+        last_review_action: "mark_group_reviewed"
+      } : item)
+    }])));
+    addReviewLog({ scope: "group", action: "mark_reviewed", row_ids: [...ids], user_note: note });
+  }
+
+  function changeCandidateFromReview(item, candidateId, groupChange = false) {
+    const candidate = item.candidates?.find((entry) => entry.id_idae === candidateId) || index.find((entry) => entry.id_idae === candidateId);
+    if (!candidate) return;
+    if (groupChange) {
+      const ok = window.confirm("Vas a cambiar el candidato IDAE para todo este grupo. ¿Quieres continuar?");
+      if (!ok) return;
+    }
+    assignCandidate(item.id, candidateId, true, candidate, "review_change_candidate");
+    addReviewLog({
+      action: "change_candidate",
+      dataset_type: item.dataset_type,
+      row_ids: [item.id],
+      previous_value: { id_idae: item.assigned?.id_idae, modelo: item.assigned?.modeloOriginal },
+      new_value: { id_idae: candidate.id_idae, modelo: candidate.modeloOriginal },
+      user_note: window.prompt("Motivo del cambio (opcional):", "") || ""
+    });
+  }
+
+  function revertNoDb(item) {
+    const ok = window.confirm("Vas a revertir el estado No DB y quitar la referencia TRA050/manual asociada. ¿Quieres continuar?");
+    if (!ok) return;
+    updateVehicleById(item.id, (current) => markChangedAfterReview({
+      ...current,
+      vehiculo_no_encontrado_db: false,
+      no_db_justification: null,
+      no_db_reason_text: "",
+      no_db_technical_basis: null,
+      compared_candidates: [],
+      reference: null,
+      consumo_origen: "",
+      consumo_referencia_tra050: "",
+      unidad_consumo: "",
+      tipologia_referencia_tra050: "",
+      combustible_referencia_tra050: "",
+      tra050_reference_auto_selected: false,
+      tra050_reference_manual_selected: false,
+      tra050_reference_reason: "",
+      match_estado: current.candidates?.length ? MATCH_STATES.conflicto : MATCH_STATES.sinMatch,
+      last_review_action: "revert_no_db"
+    }));
+    addReviewLog({ action: "revert_no_db", dataset_type: item.dataset_type, row_ids: [item.id], previous_value: { no_db_justification: item.no_db_justification } });
+  }
+
+  function undoSelectionFromReview(item) {
+    const ok = window.confirm("Vas a deshacer la seleccion de este vehiculo. Si estaba emparejado, tambien se liberara su pareja TRA050. ¿Quieres continuar?");
+    if (!ok) return;
+    const pairId = item.match_pair_id;
+    if (pairId) undoPair(pairId);
+    updateVehicleById(item.id, (current) => markChangedAfterReview({
+      ...current,
+      assigned: null,
+      id_idae_asignado: null,
+      modelo_idae_asignado: null,
+      source_url_idae: null,
+      match_estado: current.candidates?.length ? MATCH_STATES.conflicto : MATCH_STATES.sinMatch,
+      match_score: 0,
+      vehiculo_no_encontrado_db: false,
+      reference: null,
+      no_db_justification: null,
+      no_db_reason_text: "",
+      match_pair_id: null,
+      pair_status: "not_paired",
+      last_review_action: "undo_selection"
+    }));
+    addReviewLog({ action: "undo_selection", dataset_type: item.dataset_type, row_ids: [item.id], match_pair_ids: pairId ? [pairId] : [], previous_value: { assigned: item.assigned, no_db: item.vehiculo_no_encontrado_db } });
+  }
+
+  function markPairReviewed(pair) {
+    const note = window.prompt("Nota de revision del par (opcional):", pair.pair_review_notes || "") || "";
+    setPairing((current) => ({
+      ...current,
+      pairs: current.pairs.map((entry) => entry.match_pair_id === pair.match_pair_id ? {
+        ...entry,
+        pair_review_status: "reviewed",
+        pair_review_notes: note,
+        pair_reviewed_at: new Date().toISOString()
+      } : entry)
+    }));
+    addReviewLog({ scope: "pair", action: "mark_reviewed", match_pair_ids: [pair.match_pair_id], user_note: note });
+  }
+
+  function togglePairReviewLock(pair) {
+    const nextLocked = !pair.pair_review_locked;
+    setPairing((current) => ({
+      ...current,
+      pairs: current.pairs.map((entry) => entry.match_pair_id === pair.match_pair_id ? { ...entry, pair_review_locked: nextLocked } : entry)
+    }));
+    addReviewLog({ scope: "pair", action: nextLocked ? "lock_reviewed" : "unlock_reviewed", match_pair_ids: [pair.match_pair_id] });
   }
 
   function resolveIndividually(itemId) {
@@ -591,6 +803,8 @@ export default function App() {
   }
 
   function clearSession() {
+    const ok = window.confirm("Vas a limpiar la sesion local de trabajo. No se borraran las reglas aprendidas, pero se vaciaran vehiculos, emparejamientos y revision actual. ¿Quieres continuar?");
+    if (!ok) return;
     localStorage.removeItem(STORAGE_KEY);
     setDatasets(createDatasets());
     setPairing(EMPTY_PAIRING);
@@ -607,23 +821,40 @@ export default function App() {
   }
 
   async function handleSaveProjectSession() {
+    cancelRef.current = { cancelled: false };
+    const totalVehicles = vehicleCount(datasets);
     try {
-      const session = buildProjectSessionJson({
+      setProcessing({
+        stage: totalVehicles >= LARGE_PROJECT_VEHICLE_THRESHOLD ? "Preparando sesion compacta" : "Preparando sesion",
+        processed: 0,
+        total: Math.max(totalVehicles, 1),
+        percent: 0
+      });
+      const result = await saveProjectSession({
         datasets,
         pairing,
         learningRules,
         settings: {
           activeTab: activeDatasetKey,
-          defaultAnnualMileage: pairing.annualMileageKm || null
+          defaultAnnualMileage: pairing.annualMileageKm || null,
+          reviewChangeLog
         }
+      }, undefined, {
+        signal: cancelRef.current,
+        onProgress: setProcessing
       });
-      const result = await saveProjectSession(session);
-      setToast(result.usedPicker
-        ? "Sesion exportada correctamente."
-        : "Sesion exportada correctamente. Tu navegador descargara el archivo en la carpeta de descargas configurada.");
+      setLastExportedAt(new Date().toISOString());
+      const seconds = result.durationMs ? ` en ${(result.durationMs / 1000).toFixed(1)} s` : "";
+      const mode = result.optimized ? `Sesion compacta exportada: ${result.vehicleCount.toLocaleString("es-ES")} vehiculos${seconds}.` : "Sesion exportada correctamente.";
+      setToast(result.usedPicker ? mode : `${mode} Tu navegador descargara el archivo en la carpeta de descargas configurada.`);
     } catch (error) {
-      if (error?.name === "AbortError") return;
+      if (error?.name === "AbortError") {
+        setToast("Exportacion cancelada.");
+        return;
+      }
       setToast(error.message || "No se pudo guardar la sesion del proyecto.");
+    } finally {
+      setProcessing(null);
     }
   }
 
@@ -633,15 +864,19 @@ export default function App() {
       if (!ok) return;
     }
     try {
+      setProcessing({ stage: "Leyendo sesion JSON", processed: 0, total: 100, percent: 5 });
+      await new Promise((resolve) => setTimeout(resolve, 0));
       const hydrated = await loadProjectSession(file);
+      setProcessing({ stage: "Restaurando proyecto", processed: 80, total: 100, percent: 80 });
       setDatasets(resolveNoDbReferencesInDatasets(hydrated.datasets));
       setPairing({ ...EMPTY_PAIRING, ...hydrated.pairing });
+      setReviewChangeLog(hydrated.reviewChangeLog || []);
       if (hydrated.learningRulesIncluded) setLearningRules(replaceLearningRules(hydrated.learningRules));
       setSelected(null);
       const tab = hydrated.settings?.activeTab;
       const tabMap = { sold_thermal: "soldThermal", purchased_electric: "purchasedElectric" };
       const nextTab = tabMap[tab] || tab;
-      if (["soldThermal", "purchasedElectric", "pairing"].includes(nextTab)) setActiveDatasetKey(nextTab);
+      if (["soldThermal", "purchasedElectric", "pairing", "review"].includes(nextTab)) setActiveDatasetKey(nextTab);
       const soldCount = hydrated.datasets.soldThermal.matchResults.length;
       const purchasedCount = hydrated.datasets.purchasedElectric.matchResults.length;
       const pairCount = hydrated.pairing.pairs.length;
@@ -650,6 +885,8 @@ export default function App() {
       setToast(`Sesion cargada correctamente: ${soldCount} vehiculos vendidos/termicos, ${purchasedCount} vehiculos comprados/electricos, ${pairCount} parejas generadas, ${unpairedCount} vehiculos no emparejados.${warnings}`);
     } catch (error) {
       setToast(error.message || "El archivo seleccionado no parece ser una sesion valida de TRA050 MatchLab.");
+    } finally {
+      setProcessing(null);
     }
   }
 
@@ -663,6 +900,8 @@ export default function App() {
   }
 
   function handleClearLearning() {
+    const ok = window.confirm("Vas a limpiar las reglas aprendidas locales. Esta accion no afecta al proyecto cargado, pero perderas esas ayudas para futuros matching. ¿Quieres continuar?");
+    if (!ok) return;
     setLearningRules(clearLearningRules());
     setToast("Reglas aprendidas limpiadas.");
   }
@@ -712,7 +951,7 @@ export default function App() {
       const candidates = buildPairingCandidates(prepared.eligibleSold, prepared.eligiblePurchased, pairingOptions);
       setProcessing({ stage: "Optimizando emparejamiento", processed: 65, total: 100, percent: 65 });
       const lockedPairs = (pairing.pairs || []).filter((pair) => pair.pair_locked);
-      const pairs = autoPairVehicles(candidates, { lockedPairs });
+      const pairs = autoPairVehicles(candidates, { lockedPairs }).map(withPendingPairReview);
       const evaluatedCandidates = candidates.evaluatedCandidates || [];
       const usedSold = new Set(pairs.map((pair) => pair.sold_row_id));
       const usedPurchased = new Set(pairs.map((pair) => pair.purchased_row_id));
@@ -757,7 +996,8 @@ export default function App() {
 
   return (
     <main>
-      <AppHeader dbCount={index.length} onClear={clearSession} onSaveProjectSession={handleSaveProjectSession} onLoadProjectSession={handleLoadProjectSessionFile} />
+      <AppHeader dbCount={index.length} onClear={clearSession} onSaveProjectSession={handleSaveProjectSession} onLoadProjectSession={handleLoadProjectSessionFile} lastLocalSavedAt={lastLocalSavedAt} lastExportedAt={lastExportedAt} />
+      <ProcessingOverlay processing={processing} onCancel={() => { cancelRef.current.cancelled = true; }} />
       <nav className="workspace-tabs" aria-label="Espacios de trabajo">
         {Object.values(DATASET_CONFIG).map((config) => (
           <button key={config.key} className={activeDatasetKey === config.key ? "active" : "ghost"} onClick={() => { setActiveDatasetKey(config.key); setSelected(null); }}>
@@ -765,10 +1005,43 @@ export default function App() {
           </button>
         ))}
         <button className={activeDatasetKey === "pairing" ? "active" : "ghost"} onClick={() => setActiveDatasetKey("pairing")}>Emparejamiento TRA050</button>
+        <button className={activeDatasetKey === "review" ? "active" : "ghost"} onClick={() => setActiveDatasetKey("review")}>Revision final</button>
       </nav>
-      {activeDatasetKey === "pairing" ? (
+      {activeDatasetKey === "review" ? (
         <>
-          <ProcessingOverlay processing={processing} onCancel={() => { cancelRef.current.cancelled = true; }} />
+          {toast && <button className="toast" onClick={() => setToast("")}>{toast}</button>}
+          {pendingNoDb && (
+            <NoDbJustificationModal
+              items={pendingNoDb.items}
+              scope={pendingNoDb.scope}
+              groupLabel={pendingNoDb.group?.label || ""}
+              onClose={() => setPendingNoDb(null)}
+              onConfirm={confirmNoDbJustification}
+            />
+          )}
+          <FinalReviewWorkspace
+            datasets={datasets}
+            pairing={pairing}
+            reviewChangeLog={reviewChangeLog}
+            onSelectVehicle={setSelected}
+            onMarkVehicleReviewed={markVehicleReviewed}
+            onToggleVehicleLock={toggleVehicleReviewLock}
+            onChangeCandidate={changeCandidateFromReview}
+            onMarkNoDb={(item) => setPendingNoDb({ scope: "individual", items: [item] })}
+            onRevertNoDb={revertNoDb}
+            onUndoSelection={undoSelectionFromReview}
+            onMarkPairReviewed={markPairReviewed}
+            onTogglePairReviewLock={togglePairReviewLock}
+            onUndoPair={(pairId) => {
+              undoPair(pairId);
+              addReviewLog({ scope: "pair", action: "undo_pair", match_pair_ids: [pairId] });
+            }}
+            onMarkGroupReviewed={markGroupReviewed}
+          />
+          <VehicleDetailModal item={selectedFresh || selected} onClose={() => setSelected(null)} />
+        </>
+      ) : activeDatasetKey === "pairing" ? (
+        <>
           {toast && <button className="toast" onClick={() => setToast("")}>{toast}</button>}
           <PairingWorkspace
             canPair={canPair}
@@ -778,7 +1051,7 @@ export default function App() {
             onGenerate={generatePairing}
             onToggleLock={togglePairLock}
             onUndoPair={undoPair}
-            onExportFinal={() => exportFinalTra050Excel({ pairs: pairing.pairs, datasets, warnings: pairing.warnings, unpairedSold: pairing.unpairedSold, unpairedPurchased: pairing.unpairedPurchased })}
+            onExportFinal={() => exportFinalTra050Excel({ pairs: pairing.pairs, datasets, warnings: pairing.warnings, unpairedSold: pairing.unpairedSold, unpairedPurchased: pairing.unpairedPurchased, reviewChangeLog })}
           />
         </>
       ) : (
@@ -803,7 +1076,6 @@ export default function App() {
         </div>
       </section>
       <Stepper current={currentStep} />
-      <ProcessingOverlay processing={processing} onCancel={() => { cancelRef.current.cancelled = true; }} />
       {toast && <button className="toast" onClick={() => setToast("")}>{toast}</button>}
       {pendingNoDb && (
         <NoDbJustificationModal

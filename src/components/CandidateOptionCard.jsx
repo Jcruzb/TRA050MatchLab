@@ -5,6 +5,13 @@ import CandidateComparisonTable from "./CandidateComparisonTable.jsx";
 export default function CandidateOptionCard({ candidate, userFeatures, userVehicle, selected, onSelect, actionLabel = "Seleccionar", hideAction = false }) {
   const [open, setOpen] = useState(false);
   const data = formatVehicleCandidate(candidate, userVehicle || userFeatures);
+  const detailSections = [
+    ["Datos tecnicos completos IDAE", data.technicalRows.slice(6, 22)],
+    ["WLTP / consumo / emisiones", data.technicalRows.slice(22, 28)],
+    ["Datos del match", data.technicalRows.slice(28, 32)],
+    ["Origen / fuente", data.technicalRows.slice(32)]
+  ];
+
   return (
     <article className={`candidate-card ${selected ? "selected" : ""}`}>
       <div className="candidate-card-header">
@@ -41,21 +48,23 @@ export default function CandidateOptionCard({ candidate, userFeatures, userVehic
       {open && (
         <div className="candidate-full-detail">
           <CandidateComparisonTable userVehicle={userVehicle || userFeatures} candidate={candidate} />
-          {[
-            ["Resumen", data.technicalRows.slice(0, 6)],
-            ["Datos técnicos", data.technicalRows.slice(6, 22)],
-            ["WLTP / Consumo / Emisiones", data.technicalRows.slice(22, 28)],
-            ["Datos del match", data.technicalRows.slice(28, 32)],
-            ["Origen / fuente", data.technicalRows.slice(32)]
-          ].map(([title, rows]) => (
-            <section className="candidate-detail-section" key={title}>
-              <h4>{title}</h4>
+          <section className="candidate-detail-section">
+            <h4>Resumen del candidato</h4>
+            <div className="candidate-detail-table">
+              {data.technicalRows.slice(0, 6).map(([label, value]) => (
+                <p key={label}><span>{label}</span>{value || "-"}</p>
+              ))}
+            </div>
+          </section>
+          {detailSections.map(([title, rows]) => (
+            <details className="candidate-detail-accordion" key={title}>
+              <summary>{title}</summary>
               <div className="candidate-detail-table">
                 {rows.map(([label, value]) => (
-                  <p key={label}><span>{label}</span>{value || "—"}</p>
+                  <p key={label}><span>{label}</span>{value || "-"}</p>
                 ))}
               </div>
-            </section>
+            </details>
           ))}
         </div>
       )}

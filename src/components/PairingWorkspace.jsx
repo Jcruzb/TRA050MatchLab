@@ -74,7 +74,7 @@ export default function PairingWorkspace({ canPair, datasets, pairing, onAnnualM
         </div>
       </section>
       <PairingSummaryCards summary={liveSummary} />
-      <details className="panel" open={rows.length > 0}>
+      <details className="panel">
         <summary>Diagnostico de elegibilidad</summary>
         <div className="diagnostic-grid">
           <p><strong>Vendidos procesados:</strong> {prepared.debug.soldProcessed}</p>
@@ -109,7 +109,7 @@ export default function PairingWorkspace({ canPair, datasets, pairing, onAnnualM
           </div>
         ) : <p className="muted">Todos los vehiculos cargados tienen categoria, fecha, consumo y matching resuelto para entrar al emparejamiento.</p>}
       </details>
-      <details className="panel" open>
+      <details className="panel">
         <summary>Diagnostico del emparejamiento</summary>
         <div className="diagnostic-grid">
           <p><strong>Candidatos evaluados totales:</strong> {pairing.pairingDiagnostics?.totalCandidatesEvaluated || 0}</p>

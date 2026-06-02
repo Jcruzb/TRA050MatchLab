@@ -3,7 +3,7 @@ import { MATCH_MEANINGS } from "./matchEngine.js";
 import { TRA050_CONSUMO_REFERENCIA_ANTIGUO_TERMICO, TRA050_CONSUMO_REFERENCIA_NUEVO_ELECTRICO } from "../data/tra050-reference.js";
 import { factorForFuel } from "../tra050/tra050Factors.js";
 import { getAnnualMileageForTra050, getVehicleConsumptionForTra050 } from "../tra050/tra050Savings.js";
-import { buildVehicleTechnicalComparison, compareTechnicalSpecs, parseCilindradaCc, parseEmisionesGco2Km, parsePotenciaCv } from "./technicalSpecs.js";
+import { KW_TO_CV, buildVehicleTechnicalComparison, compareTechnicalSpecs, convertKwToCv, parseCilindradaCc, parseEmisionesGco2Km, parsePotenciaCv, parsePowerKw } from "./technicalSpecs.js";
 
 function officialConsumption(item) {
   if (item.assigned?.consumoElectricoKwh100) return { value: item.assigned.consumoElectricoKwh100, unit: "kWh/100km", origin: "idae_db" };
@@ -22,7 +22,8 @@ export function flattenResult(item) {
   const operationKey = item.dataset_type === "sold_thermal" ? "fecha_venta" : "fecha_compra";
   const loadedSpecs = {
     cilindradaCc: parseCilindradaCc(item.input?.cilindrada_cc || item.input?.Cilindrada_Nuevo || item.input?.cilindrada),
-    potenciaCv: parsePotenciaCv(item.input?.potencia_cv || item.input?.Potencia_Nuevo || item.input?.potencia),
+    potenciaTermicaKw: parsePowerKw(item.input?.potencia_termica_kw || item.input?.Potencia_Termica_kW_Nuevo || item.input?.Potencia_Nuevo || item.input?.potencia),
+    potenciaCv: parsePotenciaCv(item.input?.potencia_cv_calculada || item.input?.potencia_cv) || convertKwToCv(parsePowerKw(item.input?.potencia_termica_kw || item.input?.Potencia_Termica_kW_Nuevo || item.input?.Potencia_Nuevo || item.input?.potencia)),
     emisionesWltpGco2Km: parseEmisionesGco2Km(item.input?.emisiones_wltp_gco2_km_num || item.input?.Emisiones_WLTP_gCO2_km || item.input?.emisiones_wltp_gco2_km)
   };
   const idaeSpecs = {
@@ -45,6 +46,10 @@ export function flattenResult(item) {
     cilindrada: item.input?.cilindrada || item.input?.Cilindrada_Nuevo || "",
     combustible_motorizacion: item.input?.combustible_motorizacion || item.input?.Combustible_Motorizacion_Nuevo || "",
     potencia: item.input?.potencia || item.input?.Potencia_Nuevo || "",
+    potencia_termica_kw: loadedSpecs.potenciaTermicaKw ?? "",
+    potencia_cv_calculada: loadedSpecs.potenciaCv ?? "",
+    potencia_cv_conversion_factor: loadedSpecs.potenciaTermicaKw ? KW_TO_CV : "",
+    potencia_origen: loadedSpecs.potenciaTermicaKw ? "plantilla_kw" : "",
     tipo_cambio: item.input?.tipo_cambio || item.input?.Tipo_Cambio_Nuevo || "",
     carroceria: item.input?.carroceria || item.input?.Carroceria_Nuevo || "",
     version_acabado: item.input?.version_acabado || item.input?.Version_Acabado_Nuevo || "",
@@ -52,16 +57,23 @@ export function flattenResult(item) {
     observaciones: item.input?.observaciones || item.input?.Observaciones_Nuevo || "",
     cilindrada_cargada_cc: loadedSpecs.cilindradaCc ?? "",
     potencia_cargada_cv: loadedSpecs.potenciaCv ?? "",
+    potencia_termica_cargada_kw: loadedSpecs.potenciaTermicaKw ?? "",
+    factor_conversion_kw_cv: loadedSpecs.potenciaTermicaKw ? KW_TO_CV : "",
     emisiones_wltp_cargadas_gco2_km: loadedSpecs.emisionesWltpGco2Km ?? "",
     cilindrada_idae_cc: idaeSpecs.cilindradaCc ?? "",
     potencia_idae_cv: idaeSpecs.potenciaCv ?? "",
+    potencia_idae_kw: assigned.potenciaTermicaKw ?? "",
+    potencia_termica_idae_kw: assigned.potenciaTermicaKw ?? "",
     emisiones_idae_gco2_km: idaeSpecs.emisionesWltpGco2Km ?? "",
     cilindrada_match_status: technicalComparison.cilindrada?.status || "",
     cilindrada_comparacion_estado: structuredComparison.cilindrada?.status_label || structuredComparison.cilindrada?.status || "",
     cilindrada_diferencia_cc: structuredComparison.cilindrada?.difference ?? "",
     potencia_match_status: technicalComparison.potencia?.status || "",
     potencia_comparacion_estado: structuredComparison.potencia?.status_label || structuredComparison.potencia?.status || "",
+    potencia_termica_comparacion_estado: structuredComparison.potencia_termica?.status_label || structuredComparison.potencia_termica?.status || "",
+    potencia_equivalente_comparacion_estado: structuredComparison.potencia?.status_label || structuredComparison.potencia?.status || "",
     potencia_diferencia_cv: structuredComparison.potencia?.difference ?? "",
+    potencia_comparacion_explicacion: structuredComparison.potencia?.explanation || "",
     emisiones_match_status: technicalComparison.emisiones?.status || "",
     emisiones_cargadas_gco2_km: loadedSpecs.emisionesWltpGco2Km ?? "",
     emisiones_comparacion_estado: structuredComparison.emisiones?.status_label || structuredComparison.emisiones?.status || "",
@@ -101,6 +113,12 @@ export function flattenResult(item) {
     selection_source: item.selection_source || "",
     comparison_matrix_used: Boolean(item.comparison_matrix_used),
     comparison_candidate_ids: (item.comparison_candidate_ids || []).join(", "),
+    review_status: item.review_status || "pending_review",
+    review_notes: item.review_notes || "",
+    reviewed_at: item.reviewed_at || "",
+    review_locked: Boolean(item.review_locked),
+    changed_after_review: item.review_status === "changed_after_review",
+    last_review_action: item.last_review_action || "",
     learning_rule_applied: Boolean(item.learning_rule_applied),
     learning_rule_id: item.learning_rule_id || "",
     fecha_validacion: new Date().toISOString(),

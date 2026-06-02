@@ -142,13 +142,19 @@ export default function ConflictResolver({
               />
             </div>
 
-            <div className="button-row">
-              <button className="small" onClick={() => onAssignGroup(group, group.suggestedCandidate?.id_idae || selection[group.groupKey], "suggested")}><Check size={16} /> Usar sugerido para todo el grupo</button>
-              <button className="small ghost" onClick={() => onAssignGroup(group, selection[group.groupKey], "manual-selection")}><Check size={16} /> Aplicar candidato seleccionado a todo el grupo</button>
-              <button className="small ghost" onClick={() => setManualGroup(group)}><Search size={16} /> Buscar manualmente en toda la DB</button>
-              <button className="small ghost" onClick={() => setComparisonTarget({ context: "group", group, item: group.vehicles[0].matchResult })}>Comparar candidatos</button>
-              <button className="small ghost" onClick={() => onMarkGroupMissing(group)}>Marcar grupo como no encontrado en DB</button>
-              <button className="small ghost" onClick={() => setExpanded((current) => ({ ...current, [group.groupKey]: !current[group.groupKey] }))}>Resolver individualmente</button>
+            <div className="action-zone">
+              <div className="button-row">
+                <button className="small" onClick={() => onAssignGroup(group, selection[group.groupKey], "manual-selection")}><Check size={16} /> Aplicar candidato seleccionado</button>
+                <button className="small ghost" onClick={() => setComparisonTarget({ context: "group", group, item: group.vehicles[0].matchResult })}>Comparar candidatos</button>
+              </div>
+              <div className="button-row secondary-actions">
+                <button className="small ghost" onClick={() => setManualGroup(group)}><Search size={16} /> Buscar manualmente</button>
+                <button className="small ghost" onClick={() => onAssignGroup(group, group.suggestedCandidate?.id_idae || selection[group.groupKey], "suggested")}>Usar sugerido</button>
+                <button className="small ghost" onClick={() => setExpanded((current) => ({ ...current, [group.groupKey]: !current[group.groupKey] }))}>Resolver individualmente</button>
+              </div>
+              <div className="button-row critical-actions">
+                <button className="small ghost danger-action" onClick={() => onMarkGroupMissing(group)}>Marcar grupo como No encontrado en DB</button>
+              </div>
             </div>
 
             <details className="debug-box">
@@ -166,7 +172,7 @@ export default function ConflictResolver({
                       <button className="icon" onClick={() => onSelect(vehicle.matchResult)} title="Ver detalle"><Eye size={16} /></button>
                       <button className="small ghost" onClick={() => onAssign(vehicle.rowId, selection[group.groupKey], true)}>Aplicar solo a esta fila</button>
                       <button className="small ghost" onClick={() => setComparisonTarget({ context: "individual", group, item: vehicle.matchResult })}>Comparar candidatos</button>
-                      <button className="small ghost" onClick={() => onMarkMissing(vehicle.rowId)}>Marcar solo este vehiculo como no encontrado en DB</button>
+                      <button className="small ghost danger-action" onClick={() => onMarkMissing(vehicle.rowId)}>Marcar solo este vehiculo como No encontrado en DB</button>
                       <button className="small ghost" onClick={() => onResolveIndividually(vehicle.rowId)}>Separar del grupo</button>
                     </div>
                   </article>

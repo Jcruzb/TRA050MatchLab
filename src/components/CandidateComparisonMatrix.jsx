@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { buildCandidateComparisonMatrix } from "../utils/technicalSpecs.js";
+import { formatVehicleCandidate } from "../utils/formatVehicleCandidate.js";
 
 function tone(status) {
   if (status === "match") return "ok";
@@ -26,11 +27,14 @@ export default function CandidateComparisonMatrix({
   const safeCandidates = Array.isArray(candidates) ? candidates : [];
   const initialIds = safeCandidates.slice(0, Math.min(3, safeCandidates.length)).map((candidate) => candidate.id_idae);
   const [selectedIds, setSelectedIds] = useState(initialIds);
+  const [detailCandidateId, setDetailCandidateId] = useState("");
   const selectedCandidates = useMemo(
     () => safeCandidates.filter((candidate) => selectedIds.includes(candidate.id_idae)).slice(0, 5),
     [safeCandidates, selectedIds]
   );
   const matrix = useMemo(() => buildCandidateComparisonMatrix(userVehicle, selectedCandidates), [userVehicle, selectedCandidates]);
+  const detailCandidate = selectedCandidates.find((candidate) => candidate.id_idae === detailCandidateId);
+  const detailData = detailCandidate ? formatVehicleCandidate(detailCandidate, userVehicle) : null;
 
   function setTop(count) {
     setSelectedIds(safeCandidates.slice(0, Math.min(count, safeCandidates.length)).map((candidate) => candidate.id_idae));
@@ -78,6 +82,18 @@ export default function CandidateComparisonMatrix({
         {!selectedCandidates.length ? (
           <p className="muted">Selecciona al menos un candidato para comparar.</p>
         ) : (
+          <>
+          {detailData && (
+            <section className="comparison-detail-preview">
+              <div>
+                <strong>IDAE {detailData.idIdae} · {detailData.score} pts</strong>
+                <p className="muted">{detailData.title}</p>
+              </div>
+              <div className="candidate-fields">
+                {detailData.compactFields.slice(0, 6).map(([label, value]) => <p key={label}><span>{label}</span>{value}</p>)}
+              </div>
+            </section>
+          )}
           <div className="matrix-scroll">
             <table className="comparison-matrix-table">
               <thead>
@@ -95,6 +111,9 @@ export default function CandidateComparisonMatrix({
                         onClick={() => onSelectCandidate?.(candidate)}
                       >
                         {context === "group" ? "Seleccionar para todo el grupo" : "Seleccionar para este vehiculo"}
+                      </button>
+                      <button type="button" className="small ghost" onClick={() => setDetailCandidateId((current) => current === candidate.id_idae ? "" : candidate.id_idae)}>
+                        {detailCandidateId === candidate.id_idae ? "Ocultar detalle" : "Ver detalle"}
                       </button>
                     </th>
                   ))}
@@ -116,6 +135,7 @@ export default function CandidateComparisonMatrix({
               </tbody>
             </table>
           </div>
+          </>
         )}
       </section>
     </div>

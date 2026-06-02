@@ -14,7 +14,7 @@ export const RECOMMENDED_FIELDS = [
   "Precio (SIN IVA)",
   "Cilindrada_Nuevo",
   "Combustible_Motorizacion_Nuevo",
-  "Potencia_Nuevo",
+  "Potencia_Termica_kW_Nuevo",
   "Emisiones_WLTP_gCO2_km",
   "Tipo_Cambio_Nuevo",
   "Carroceria_Nuevo",
