@@ -466,11 +466,15 @@ export default function App() {
     }) }));
   }
 
-  function assignCandidateToGroup(group, candidateId, mode = "manual-selection") {
+  function assignCandidateToGroup(group, candidateId, mode = "manual-selection", candidateOverride = null) {
+    if (group.groupSize > 1) {
+      const ok = window.confirm(`Vas a aplicar el candidato IDAE ${candidateId} a ${group.groupSize} vehiculos de este grupo.\n\nQuieres continuar?`);
+      if (!ok) return;
+    }
     const timestamp = new Date().toISOString();
     const ids = new Set(group.vehicles.map((vehicle) => vehicle.rowId));
     items.filter((item) => ids.has(item.id)).forEach((item) => {
-      const candidate = item.candidates.find((entry) => entry.id_idae === candidateId) || index.find((entry) => entry.id_idae === candidateId);
+      const candidate = candidateOverride || item.candidates.find((entry) => entry.id_idae === candidateId) || index.find((entry) => entry.id_idae === candidateId);
       if (!candidate) return;
       setLearningRules(saveLearningRule({
         inputSignature: item.userFeatures?.normalizedText,
@@ -484,13 +488,16 @@ export default function App() {
     });
     updateActiveDataset((dataset) => ({ ...dataset, matchResults: dataset.matchResults.map((item) => {
       if (!ids.has(item.id)) return item;
-      const candidate = item.candidates.find((entry) => entry.id_idae === candidateId) || index.find((entry) => entry.id_idae === candidateId);
+      const candidate = candidateOverride || item.candidates.find((entry) => entry.id_idae === candidateId) || index.find((entry) => entry.id_idae === candidateId);
       if (!candidate) return item;
       const technical_comparison = buildVehicleTechnicalComparison(item, candidate);
       const technicalComparison = compareTechnicalSpecs(item.userFeatures || {}, candidate);
       return markChangedAfterReview({
         ...item,
         assigned: candidate,
+        id_idae_asignado: candidate.id_idae,
+        modelo_idae_asignado: candidate.modelo_tabla || candidate.raw?.modelo_tabla || candidate.titulo_modal || candidate.modeloOriginal || "",
+        source_url_idae: candidate.source_url || candidate.raw?.source_url || "",
         technical_comparison,
         technicalComparison,
         match_estado: MATCH_STATES.exacto,
@@ -519,6 +526,11 @@ export default function App() {
         conflict_group_key: group.groupKey,
         conflict_group_label: group.label,
         conflict_group_size: group.groupSize,
+        group_status: "resolved",
+        resolved_vehicle_count: group.groupSize,
+        total_vehicle_count: group.groupSize,
+        group_vehicle_count: group.groupSize,
+        group_resolved_count: group.groupSize,
         resolved_as_group: true,
         group_resolution_key: group.groupKey,
         group_resolution_applied: true,
@@ -599,6 +611,11 @@ export default function App() {
       conflict_group_key: group.groupKey,
       conflict_group_label: group.label,
       conflict_group_size: group.groupSize,
+      group_status: "marked_no_db",
+      resolved_vehicle_count: group.groupSize,
+      total_vehicle_count: group.groupSize,
+      group_vehicle_count: group.groupSize,
+      group_resolved_count: group.groupSize,
       resolved_as_group: true,
       group_resolution_key: group.groupKey,
       group_resolution_applied: true,
@@ -1093,10 +1110,10 @@ export default function App() {
       <ValidationSummary validation={validation} />
       <MatchSummaryCards items={items} alerts={validation?.alerts || []} />
       <VehiclesTable items={items} datasetType={activeConfig.type} resetKey={`${activeDatasetKey}:${activeDataset.tableVersion || 0}`} onSelect={setSelected} onMarkMissing={openNoDbJustification} />
-      <ConflictResolver groups={conflictGroups} index={index} onAssign={assignCandidate} onAssignGroup={assignCandidateToGroup} onApplySimilar={applySimilar} onMarkMissing={openNoDbJustification} onMarkGroupMissing={openGroupNoDbJustification} onResolveIndividually={resolveIndividually} onSelect={setSelected} />
+      <ConflictResolver groups={conflictGroups} items={items} index={index} onAssign={assignCandidate} onAssignGroup={assignCandidateToGroup} onApplySimilar={applySimilar} onMarkMissing={openNoDbJustification} onMarkGroupMissing={openGroupNoDbJustification} onResolveIndividually={resolveIndividually} onSelect={setSelected} />
       <MissingReferencePanel items={items} onUpdate={updateMissingReference} />
       <ManualDbSearch index={index} selectedItem={selectedFresh} onAssign={assignCandidate} />
-      <ExportPanel items={items} datasets={datasets} activeDatasetKey={activeDatasetKey} learningRules={learningRules} learningCount={learningRules.length} pairing={pairing} onExportLearning={exportLearningRules} onImportLearning={handleImportLearning} onClearLearning={handleClearLearning} />
+      <ExportPanel items={items} datasets={datasets} activeDatasetKey={activeDatasetKey} learningRules={learningRules} learningCount={learningRules.length} pairing={pairing} onExportLearning={exportLearningRules} onImportLearning={handleImportLearning} onClearLearning={handleClearLearning} onNotify={setToast} />
       <VehicleDetailModal item={selectedFresh} onClose={() => setSelected(null)} />
       </>
       )}

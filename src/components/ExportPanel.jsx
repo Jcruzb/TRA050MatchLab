@@ -1,9 +1,13 @@
 import { Download } from "lucide-react";
-import { exportDatasetExcel, exportIdaeEvidenceManifest, exportProjectJson, exportResultsExcel, exportResultsJson } from "../utils/exportResults.js";
+import { exportDatasetExcel, exportEvidenceIdsTxt, exportIdaeEvidenceManifest, exportProjectJson, exportResultsExcel, exportResultsJson } from "../utils/exportResults.js";
 
-export default function ExportPanel({ items, datasets, activeDatasetKey, learningRules, learningCount, pairing, onExportLearning, onImportLearning, onClearLearning }) {
+export default function ExportPanel({ items, datasets, activeDatasetKey, learningRules, learningCount, pairing, onExportLearning, onImportLearning, onClearLearning, onNotify }) {
   const isSold = activeDatasetKey === "soldThermal";
   const activeDataset = datasets?.[activeDatasetKey];
+  function handleExportEvidenceIds() {
+    const result = exportEvidenceIdsTxt(datasets);
+    onNotify?.(`Archivo ids-evidencia.txt generado correctamente. IDs unicos incluidos: ${result.totalIds}. Vendidos: ${result.soldIds}. Comprados: ${result.purchasedIds}. Vehiculos No DB omitidos: ${result.skippedNoDb}.`);
+  }
   return (
     <section className="panel export-panel">
       <div>
@@ -18,6 +22,7 @@ export default function ExportPanel({ items, datasets, activeDatasetKey, learnin
         </button>
         <button className="ghost" disabled={!items.length} onClick={() => exportResultsJson(items)}>Exportar JSON</button>
         <button className="ghost" onClick={() => exportProjectJson(datasets, learningRules, pairing)}>Exportar proyecto completo JSON</button>
+        <button className="ghost" onClick={handleExportEvidenceIds}>Exportar ids-evidencia.txt</button>
         <button className="ghost" onClick={() => exportIdaeEvidenceManifest(datasets)}>Exportar manifest de evidencias IDAE</button>
         <button className="ghost" onClick={onExportLearning}>Exportar reglas aprendidas</button>
         <label className="file-button secondary">

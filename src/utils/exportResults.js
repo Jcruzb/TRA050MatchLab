@@ -129,9 +129,13 @@ export function flattenResult(item) {
     observaciones_match: item.notes || "",
     conflict_group_key: item.conflict_group_key || item.group_resolution_key || "",
     conflict_group_label: item.conflict_group_label || "",
+    group_status: item.group_status || "",
     conflict_group_size: item.conflict_group_size || "",
     resolved_as_group: Boolean(item.resolved_as_group),
     group_resolution_mode: item.group_resolution_mode || "",
+    selection_source: item.selection_source || "",
+    group_vehicle_count: item.group_vehicle_count || item.total_vehicle_count || item.conflict_group_size || "",
+    group_resolved_count: item.group_resolved_count || item.resolved_vehicle_count || "",
     group_resolution_timestamp: item.group_resolution_timestamp || ""
     ,
     match_pair_id: item.input?.match_pair_id || item.match_pair_id || null,
@@ -203,6 +207,75 @@ export function exportIdaeEvidenceManifest(datasets) {
     };
   });
   downloadJson({ app: "TRA050 MatchLab", manifest_type: "idae_evidence_manifest", generated_at: new Date().toISOString(), items }, "tra050-idae-evidence-manifest.json");
+}
+
+function normalizeIdaeId(value) {
+  const id = value === null || value === undefined ? "" : String(value).trim();
+  return id || null;
+}
+
+function idaeIdFromItem(item) {
+  return normalizeIdaeId(
+    item?.id_idae_asignado
+    || item?.idIdaeAsignado
+    || item?.assigned?.id_idae
+    || item?.selectedCandidate?.id_idae
+    || item?.candidate?.id_idae
+  );
+}
+
+function compareIdaeIds(a, b) {
+  const numericA = /^\d+$/.test(a);
+  const numericB = /^\d+$/.test(b);
+  if (numericA && numericB) return Number(a) - Number(b);
+  return a.localeCompare(b, "es", { numeric: true, sensitivity: "base" });
+}
+
+function collectEvidenceIds(items, seen) {
+  const ids = new Set();
+  let skippedNoDb = 0;
+  let skippedWithoutIdae = 0;
+  (items || []).forEach((item) => {
+    if (item?.vehiculo_no_encontrado_db) {
+      skippedNoDb += 1;
+      return;
+    }
+    const id = idaeIdFromItem(item);
+    if (!id) {
+      skippedWithoutIdae += 1;
+      return;
+    }
+    ids.add(id);
+    seen.add(id);
+  });
+  return { ids, skippedNoDb, skippedWithoutIdae };
+}
+
+export function buildEvidenceIdsTxt(projectState = {}) {
+  const datasets = projectState.datasets || projectState;
+  const seen = new Set();
+  const sold = collectEvidenceIds(datasets.soldThermal?.matchResults || datasets.soldThermal?.records, seen);
+  const purchased = collectEvidenceIds(datasets.purchasedElectric?.matchResults || datasets.purchasedElectric?.records, seen);
+  const ids = [...seen].sort(compareIdaeIds);
+  return {
+    content: ids.length ? `${ids.join("\n")}\n` : "",
+    totalIds: ids.length,
+    soldIds: sold.ids.size,
+    purchasedIds: purchased.ids.size,
+    skippedNoDb: sold.skippedNoDb + purchased.skippedNoDb,
+    skippedWithoutIdae: sold.skippedWithoutIdae + purchased.skippedWithoutIdae
+  };
+}
+
+export function exportEvidenceIdsTxt(projectState) {
+  const result = buildEvidenceIdsTxt(projectState);
+  const blob = new Blob([result.content], { type: "text/plain;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "ids-evidencia.txt";
+  link.click();
+  URL.revokeObjectURL(link.href);
+  return result;
 }
 
 function downloadJson(payload, fileName) {
