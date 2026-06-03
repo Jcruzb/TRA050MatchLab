@@ -4,7 +4,7 @@ import { groupConflictResults } from "./groupConflicts.js";
 export const PROJECT_SESSION_SCHEMA_VERSION = "1.0.0";
 export const PROJECT_SESSION_APP = "TRA050 MatchLab";
 export const PROJECT_SESSION_APP_VERSION = "0.1.0";
-export const LARGE_PROJECT_VEHICLE_THRESHOLD = 10_000;
+export const LARGE_PROJECT_VEHICLE_THRESHOLD = 1_000;
 
 function stampForFile(date = new Date()) {
   const pad = (value) => String(value).padStart(2, "0");

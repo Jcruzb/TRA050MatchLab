@@ -10,7 +10,7 @@ export default function UploadPanel({ onRows, onError, datasetKey, title = "Carg
     setReading(true);
     try {
       const rows = await readExcelFile(file);
-      await onRows(rows);
+      await onRows(rows, { fileName: file.name, fileSize: file.size, fileType: file.type });
     } catch (error) {
       onError(error.message || "No se pudo leer el Excel. Revisa que el archivo no este corrupto y que la primera hoja contenga datos.");
     } finally {

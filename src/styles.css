@@ -238,6 +238,16 @@ th { position: sticky; top: 0; background: #f8fafb; color: #4d5a68; font-size: 1
 .processing-overlay { position: fixed; inset: 0; z-index: 30; background: rgba(245,247,251,.82); display: grid; place-items: center; padding: 18px; }
 .processing-card { width: min(460px, 100%); background: white; border: 1px solid #dfe7ec; border-radius: 8px; box-shadow: 0 24px 80px rgba(23,35,52,.2); padding: 22px; display: grid; gap: 10px; text-align: center; }
 .processing-card progress { width: 100%; height: 12px; accent-color: #116149; }
+.large-project-card { width: min(560px, 100%); }
+.progress-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 6px 0; text-align: left; }
+.progress-details div { border: 1px solid #dfe7ec; border-radius: 8px; padding: 10px; background: #f8fafb; }
+.progress-details dt { color: #506174; font-size: 12px; font-weight: 800; text-transform: uppercase; }
+.progress-details dd { margin: 3px 0 0; font-weight: 800; }
+.recovery-banner { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 0 auto 16px; width: min(1180px, calc(100% - 32px)); border: 1px solid #b8d8c8; background: #eef9f3; border-radius: 8px; padding: 14px 16px; }
+.recovery-banner p { margin: 4px 0 0; color: #506174; }
+.danger-button { color: #9e2626; border-color: #f3b7b7; }
+.decision-actions { display: grid; gap: 10px; margin-top: 6px; }
+.decision-actions button { justify-content: center; }
 .spinner { width: 38px; height: 38px; border: 4px solid #dbe6ec; border-top-color: #116149; border-radius: 50%; animation: spin .8s linear infinite; margin: 0 auto; }
 .pagination { display: flex; justify-content: flex-end; align-items: center; gap: 10px; padding-top: 12px; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -245,6 +255,8 @@ th { position: sticky; top: 0; background: #f8fafb; color: #4d5a68; font-size: 1
 @media (max-width: 860px) {
   main { width: min(100% - 16px, 760px); padding-top: 12px; }
   .app-header, .export-panel, .section-heading { align-items: flex-start; flex-direction: column; }
+  .recovery-banner { align-items: flex-start; flex-direction: column; }
+  .progress-details { grid-template-columns: 1fr; }
   .stepper, .load-grid, .summary-grid, .manual-grid, .manual-grid.expanded, .no-db-grid, .detail-grid, .missing-item, .group-vehicles article, .manual-results.table-like article, .candidate-toolbar, .candidate-fields, .candidate-detail-table, .dataset-overview, .conflict-summary-grid, .progress-stack, .conflict-filter-row.inputs { grid-template-columns: 1fr; }
   .group-heading { flex-direction: column; }
   .candidate-card-header { flex-direction: column; }

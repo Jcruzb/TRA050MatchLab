@@ -12,12 +12,15 @@ import MissingReferencePanel from "./components/MissingReferencePanel.jsx";
 import VehicleDetailModal from "./components/VehicleDetailModal.jsx";
 import ExportPanel from "./components/ExportPanel.jsx";
 import ProcessingOverlay from "./components/ProcessingOverlay.jsx";
+import LargeProjectProgressOverlay from "./components/LargeProjectProgressOverlay.jsx";
+import RecoverySessionBanner from "./components/RecoverySessionBanner.jsx";
+import LargeProjectDecisionDialog from "./components/LargeProjectDecisionDialog.jsx";
 import PairingWorkspace from "./components/PairingWorkspace.jsx";
 import NoDbJustificationModal from "./components/NoDbJustificationModal.jsx";
 import FinalReviewWorkspace from "./components/FinalReviewWorkspace.jsx";
 import { VEHICLE_DB } from "./data/vehicle-db.js";
 import { TRA050_CONSUMO_REFERENCIA_NUEVO_ELECTRICO } from "./data/tra050-reference.js";
-import { buildSearchIndex, matchRowsInChunks, MATCH_MEANINGS, MATCH_STATES } from "./utils/matchEngine.js";
+import { buildSearchIndex, matchRowsInChunks, matchVehicleWithCache, MATCH_MEANINGS, MATCH_STATES } from "./utils/matchEngine.js";
 import { normalizeText } from "./utils/normalize.js";
 import { groupConflictResults } from "./utils/groupConflicts.js";
 import { clearLearningRules, exportLearningRules, importLearningRules, loadLearningRules, replaceLearningRules, saveLearningRule } from "./engine/vehicleLearning.js";
@@ -25,8 +28,21 @@ import { createEmptyDataset, DATASET_CONFIG, validateDatasetRows } from "./utils
 import { applyPairsToDatasets, autoPairVehicles, buildPairingCandidates, prepareVehiclesForPairing, validatePairingIntegrity } from "./tra050/tra050Pairing.js";
 import { exportFinalTra050Excel } from "./tra050/tra050PairExport.js";
 import { applyTra050ReferenceResolution } from "./tra050/tra050ReferenceResolver.js";
-import { LARGE_PROJECT_VEHICLE_THRESHOLD, loadProjectSession, saveProjectSession, vehicleCount } from "./utils/projectSession.js";
+import { LARGE_PROJECT_VEHICLE_THRESHOLD, hydrateProjectSession, loadProjectSession, saveProjectSession, vehicleCount } from "./utils/projectSession.js";
 import { buildVehicleTechnicalComparison, compareTechnicalSpecs } from "./utils/technicalSpecs.js";
+import { deleteLargeProject, listRecoverableProjects, markProjectError } from "./storage/indexedDbProjectStore.js";
+import {
+  chunkSizeForTotalRows,
+  completeAutosaveProject,
+  exportLargeProjectSessionFromIndexedDb,
+  hydrateLargeProjectDataset,
+  hydrateLargeProjectSourceRows,
+  saveProcessedVehicleChunk,
+  saveSourceRowsChunk,
+  shouldUseLargeProjectMode,
+  startLargeProjectAutosave,
+  updateAutosaveProgress
+} from "./storage/largeProjectAutosave.js";
 
 const STORAGE_KEY = "tra050-matchlab-session";
 const EMPTY_PAIRING = { pairs: [], unpairedSold: [], unpairedPurchased: [], candidates: [], warnings: [], summary: {}, integrity: null, updatedAt: null, annualMileageKm: "" };
@@ -242,6 +258,9 @@ export default function App() {
   const [selected, setSelected] = useState(null);
   const [toast, setToast] = useState("");
   const [processing, setProcessing] = useState(null);
+  const [largeProjectProgress, setLargeProjectProgress] = useState(null);
+  const [recoverableProject, setRecoverableProject] = useState(null);
+  const [largeProjectDecision, setLargeProjectDecision] = useState(null);
   const [learningRules, setLearningRules] = useState(() => loadLearningRules());
   const [pendingNoDb, setPendingNoDb] = useState(null);
   const [reviewChangeLog, setReviewChangeLog] = useState([]);
@@ -268,6 +287,18 @@ export default function App() {
         }
       }, 80);
     });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    listRecoverableProjects()
+      .then((projects) => {
+        if (!cancelled && projects[0]) setRecoverableProject(projects[0]);
+      })
+      .catch((error) => console.warn("No se pudo revisar proyectos grandes recuperables.", error));
     return () => {
       cancelled = true;
     };
@@ -379,6 +410,17 @@ export default function App() {
     });
   }
 
+  function askLargeProjectDecision({ totalRows, fileMeta }) {
+    return new Promise((resolve) => {
+      setLargeProjectDecision({ totalRows, fileMeta, resolve });
+    });
+  }
+
+  function resolveLargeProjectDecision(choice) {
+    if (largeProjectDecision?.resolve) largeProjectDecision.resolve(choice);
+    setLargeProjectDecision(null);
+  }
+
   function markChangedAfterReview(item) {
     return {
       ...item,
@@ -387,7 +429,96 @@ export default function App() {
     };
   }
 
-  async function handleRows(rows) {
+  async function processRowsWithLargeAutosave(rows, validationResult, tableVersion, fileMeta = {}) {
+    const totalRows = validationResult.rows.length;
+    const chunkSize = chunkSizeForTotalRows(totalRows);
+    const totalChunks = Math.ceil(totalRows / chunkSize);
+    const project = await startLargeProjectAutosave({
+      datasetType: activeConfig.type,
+      totalRows,
+      chunkSize,
+      fileName: fileMeta.fileName || ""
+    });
+    const matched = [];
+    const startedAt = performance.now();
+    try {
+      for (let start = 0; start < totalRows; start += chunkSize) {
+        const sourceRows = validationResult.rows.slice(start, start + chunkSize);
+        await saveSourceRowsChunk({
+          projectId: project.project_id,
+          datasetType: activeConfig.type,
+          chunkIndex: Math.floor(start / chunkSize),
+          startRow: start,
+          rows: sourceRows
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      for (let start = 0; start < totalRows; start += chunkSize) {
+        if (cancelRef.current.cancelled) throw new DOMException("Procesamiento cancelado por el usuario.", "AbortError");
+        const chunkRows = validationResult.rows.slice(start, start + chunkSize).map((row) => ({ ...row, expected_powertrain: activeConfig.expectedPowertrain }));
+        const chunkIndex = Math.floor(start / chunkSize);
+        const chunkMatched = chunkRows.map((row, offset) => matchVehicleWithCache(row, start + offset, index, learningRules));
+        const enriched = resolveNoDbReferencesInDataset({ matchResults: addDatasetWarnings(chunkMatched, activeConfig) }).matchResults;
+        await saveProcessedVehicleChunk({
+          projectId: project.project_id,
+          datasetType: activeConfig.type,
+          chunkIndex,
+          startRow: start,
+          records: enriched
+        });
+        matched.push(...enriched);
+        const processedRows = Math.min(start + chunkRows.length, totalRows);
+        const percent = Math.round((processedRows / totalRows) * 100);
+        const lastSavedAt = new Date().toISOString();
+        const elapsed = performance.now() - startedAt;
+        const rowsPerMs = processedRows / Math.max(elapsed, 1);
+        const remainingMs = (totalRows - processedRows) / Math.max(rowsPerMs, 0.001);
+        const eta = processedRows < totalRows ? `${Math.max(1, Math.round(remainingMs / 1000))} s restantes aprox.` : "";
+        const progress = {
+          projectId: project.project_id,
+          stage: "Procesando matching y guardando avance",
+          processedRows,
+          totalRows,
+          percent,
+          savedChunks: chunkIndex + 1,
+          totalChunks,
+          lastSavedAt,
+          eta
+        };
+        setLargeProjectProgress(progress);
+        await updateAutosaveProgress(project.project_id, {
+          processed_rows: processedRows,
+          last_progress: progress,
+          last_chunk_index: chunkIndex
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      await completeAutosaveProject(project.project_id, { dataset_key: activeDatasetKey });
+    } catch (error) {
+      await markProjectError(project.project_id, { stage: "Procesando matching y guardando avance", message: error.message });
+      throw error;
+    }
+    updateActiveDataset((dataset) => ({
+      ...dataset,
+      rawRows: [],
+      normalizedRows: validationResult.rows,
+      validation: validationResult,
+      matchResults: matched,
+      conflictGroups: groupConflictResults(matched),
+      exportReady: true,
+      tableVersion,
+      largeProject: {
+        project_id: project.project_id,
+        indexeddb_enabled: true,
+        total_rows: totalRows,
+        chunk_size: chunkSize
+      }
+    }));
+    setRecoverableProject(null);
+    return { project, matched };
+  }
+
+  async function handleRows(rows, fileMeta = {}) {
     cancelRef.current = { cancelled: false };
     setSelected(null);
     setProcessing({ stage: "Validando estructura", processed: 0, total: rows.length, percent: 0 });
@@ -401,6 +532,26 @@ export default function App() {
         setProcessing(null);
         return;
       }
+      const largeProjectDetected = shouldUseLargeProjectMode({ totalRows: result.rows.length, fileSize: fileMeta.fileSize || 0 });
+      if (largeProjectDetected) {
+        setProcessing(null);
+        const choice = await askLargeProjectDecision({ totalRows: result.rows.length, fileMeta });
+        if (choice === "progressive") {
+          setLargeProjectProgress({
+            stage: "Preparando guardado progresivo",
+            processedRows: 0,
+            totalRows: result.rows.length,
+            percent: 0,
+            savedChunks: 0,
+            totalChunks: Math.ceil(result.rows.length / chunkSizeForTotalRows(result.rows.length)),
+            lastSavedAt: null
+          });
+          const { project } = await processRowsWithLargeAutosave(rows, result, tableVersion, fileMeta);
+          setToast(`Procesamiento completado y guardado localmente. Ya puedes exportar la sesion JSON optimizada. Proyecto ${project.project_id}.`);
+          return;
+        }
+        if (choice !== "normal") return;
+      }
       setProcessing({ stage: "Ejecutando matching", processed: 0, total: result.rows.length, percent: 0 });
       const engineRows = result.rows.map((row) => ({ ...row, expected_powertrain: activeConfig.expectedPowertrain }));
       const matched = await matchRowsInChunks(engineRows, index, setProcessing, cancelRef.current, learningRules);
@@ -410,9 +561,134 @@ export default function App() {
       updateActiveDataset((dataset) => ({ ...dataset, normalizedRows: result.rows, validation: result, matchResults, conflictGroups: groupConflictResults(matchResults), exportReady: true, tableVersion }));
       setToast(`Carga procesada: ${result.rows.length} vehiculos.`);
     } catch (error) {
+      if (largeProjectProgress?.projectId) {
+        await markProjectError(largeProjectProgress.projectId, { stage: largeProjectProgress.stage, message: error.message });
+      }
+      if (error?.name === "AbortError") {
+        setToast("Procesamiento cancelado. Los chunks ya guardados siguen disponibles para recuperacion.");
+        return;
+      }
       setToast(error.message || "No se pudo completar el analisis. Revisa el archivo o intenta procesar menos filas.");
     } finally {
       setProcessing(null);
+      setLargeProjectProgress(null);
+    }
+  }
+
+  async function handleContinueRecoverableProject() {
+    if (!recoverableProject) return;
+    try {
+      setProcessing({ stage: "Recuperando proyecto grande", processed: 0, total: recoverableProject.total_rows || 1, percent: 5 });
+      const records = await hydrateLargeProjectDataset(recoverableProject.project_id, recoverableProject.dataset_type);
+      const sourceRows = await hydrateLargeProjectSourceRows(recoverableProject.project_id, recoverableProject.dataset_type);
+      const datasetKey = recoverableProject.dataset_type === "purchased_electric" ? "purchasedElectric" : "soldThermal";
+      const config = DATASET_CONFIG[datasetKey];
+      if (sourceRows.length > records.length && !cancelRef.current.cancelled) {
+        const ok = window.confirm(`Se recuperaron ${records.length.toLocaleString("es-ES")} vehiculos ya guardados y quedan filas pendientes. ¿Quieres continuar el matching desde el ultimo chunk correcto?`);
+        if (ok) {
+          cancelRef.current = { cancelled: false };
+          const chunkSize = recoverableProject.chunk_size || chunkSizeForTotalRows(sourceRows.length);
+          const totalChunks = Math.ceil(sourceRows.length / chunkSize);
+          const matched = [...records];
+          for (let start = records.length; start < sourceRows.length; start += chunkSize) {
+            if (cancelRef.current.cancelled) throw new DOMException("Procesamiento cancelado por el usuario.", "AbortError");
+            const chunkRows = sourceRows.slice(start, start + chunkSize).map((row) => ({ ...row, expected_powertrain: config.expectedPowertrain }));
+            const chunkIndex = Math.floor(start / chunkSize);
+            const chunkMatched = chunkRows.map((row, offset) => matchVehicleWithCache(row, start + offset, index, learningRules));
+            const enriched = resolveNoDbReferencesInDataset({ matchResults: addDatasetWarnings(chunkMatched, config) }).matchResults;
+            await saveProcessedVehicleChunk({
+              projectId: recoverableProject.project_id,
+              datasetType: recoverableProject.dataset_type,
+              chunkIndex,
+              startRow: start,
+              records: enriched
+            });
+            matched.push(...enriched);
+            const processedRows = Math.min(start + chunkRows.length, sourceRows.length);
+            const progress = {
+              projectId: recoverableProject.project_id,
+              stage: "Continuando matching y guardando avance",
+              processedRows,
+              totalRows: sourceRows.length,
+              percent: Math.round((processedRows / sourceRows.length) * 100),
+              savedChunks: chunkIndex + 1,
+              totalChunks,
+              lastSavedAt: new Date().toISOString()
+            };
+            setLargeProjectProgress(progress);
+            await updateAutosaveProgress(recoverableProject.project_id, {
+              processed_rows: processedRows,
+              last_progress: progress,
+              last_chunk_index: chunkIndex
+            });
+            await new Promise((resolve) => setTimeout(resolve, 0));
+          }
+          await completeAutosaveProject(recoverableProject.project_id, { dataset_key: datasetKey });
+          const resumedSession = {
+            app: "TRA050 MatchLab",
+            schema_version: "1.0.0",
+            soldThermal: recoverableProject.dataset_type === "sold_thermal" ? { records: matched } : { records: [] },
+            purchasedElectric: recoverableProject.dataset_type === "purchased_electric" ? { records: matched } : { records: [] },
+            pairing: {},
+            review_change_log: [],
+            idaeSelectionIndex: {},
+            settings: { activeTab: datasetKey }
+          };
+          const resumed = hydrateProjectSession(resumedSession);
+          setDatasets(resolveNoDbReferencesInDatasets(resumed.datasets));
+          setPairing(EMPTY_PAIRING);
+          setSelected(null);
+          setActiveDatasetKey(datasetKey);
+          setRecoverableProject(null);
+          setToast(`Proyecto grande continuado: ${matched.length.toLocaleString("es-ES")} vehiculos procesados y guardados.`);
+          return;
+        }
+      }
+      const session = {
+        app: "TRA050 MatchLab",
+        schema_version: "1.0.0",
+        soldThermal: recoverableProject.dataset_type === "sold_thermal" ? { records } : { records: [] },
+        purchasedElectric: recoverableProject.dataset_type === "purchased_electric" ? { records } : { records: [] },
+        pairing: {},
+        review_change_log: [],
+        idaeSelectionIndex: {},
+        settings: { activeTab: datasetKey }
+      };
+      const hydrated = hydrateProjectSession(session);
+      setDatasets(resolveNoDbReferencesInDatasets(hydrated.datasets));
+      setPairing(EMPTY_PAIRING);
+      setSelected(null);
+      setActiveDatasetKey(hydrated.settings.activeTab);
+      setRecoverableProject(null);
+      setToast(`Proyecto grande recuperado: ${records.length.toLocaleString("es-ES")} vehiculos restaurados desde IndexedDB.`);
+    } catch (error) {
+      setToast(error.message || "No se pudo recuperar el proyecto grande.");
+    } finally {
+      setProcessing(null);
+      setLargeProjectProgress(null);
+    }
+  }
+
+  async function handleExportRecoverableProject() {
+    if (!recoverableProject) return;
+    try {
+      const result = await exportLargeProjectSessionFromIndexedDb(recoverableProject.project_id, { project: recoverableProject });
+      setToast(result.warning || "Avance exportado en formato TRA050 Large Session JSONL.");
+    } catch (error) {
+      setToast(error.message || "No se pudo exportar el avance guardado.");
+    }
+  }
+
+  async function handleDiscardRecoverableProject() {
+    if (!recoverableProject) return;
+    const ok = window.confirm("Se borrara el avance guardado en IndexedDB para este proyecto grande. ¿Quieres continuar?");
+    if (!ok) return;
+    try {
+      await deleteLargeProject(recoverableProject.project_id);
+      setRecoverableProject(null);
+      setToast("Avance guardado descartado.");
+    } catch (error) {
+      setToast(error.message || "No se pudo descartar el proyecto grande.");
     }
   }
 
@@ -1015,6 +1291,9 @@ export default function App() {
     <main>
       <AppHeader dbCount={index.length} onClear={clearSession} onSaveProjectSession={handleSaveProjectSession} onLoadProjectSession={handleLoadProjectSessionFile} lastLocalSavedAt={lastLocalSavedAt} lastExportedAt={lastExportedAt} />
       <ProcessingOverlay processing={processing} onCancel={() => { cancelRef.current.cancelled = true; }} />
+      <LargeProjectProgressOverlay progress={largeProjectProgress} onCancel={() => { cancelRef.current.cancelled = true; }} />
+      <LargeProjectDecisionDialog decision={largeProjectDecision} onChoose={resolveLargeProjectDecision} />
+      <RecoverySessionBanner project={recoverableProject} onContinue={handleContinueRecoverableProject} onExport={handleExportRecoverableProject} onDiscard={handleDiscardRecoverableProject} />
       <nav className="workspace-tabs" aria-label="Espacios de trabajo">
         {Object.values(DATASET_CONFIG).map((config) => (
           <button key={config.key} className={activeDatasetKey === config.key ? "active" : "ghost"} onClick={() => { setActiveDatasetKey(config.key); setSelected(null); }}>
